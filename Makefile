@@ -17,7 +17,7 @@ unload:
 	-rmmod $(NAME).ko
 
 load:
-	insmod $(NAME).ko qdisc=pfifo
+	insmod $(NAME).ko qdisc=pfifo max_active=20
 
 clean:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
