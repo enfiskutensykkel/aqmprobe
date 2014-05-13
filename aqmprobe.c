@@ -22,12 +22,41 @@
 #include <linux/types.h>
 #include <net/net_namespace.h>
 
+// http://www.cs.fsu.edu/~baker/devices/lxr/http/source/linux/samples/kprobes/kretprobe_example.c
+// https://www.kernel.org/doc/Documentation/kprobes.txt
+
 MODULE_AUTHOR("Jonas Sæther Markussen");
 MODULE_DESCRIPTION("qdisc statistics");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
 static const char proc_name[] = "aqmprobe";
+
+static struct { const char* qdisc; const char* entry; } known_entry_points[] =
+{
+	{
+		.qdisc = "pfifo",
+		.entry = "pfifo_enqueue"
+	},
+	{
+		.qdisc = "bfifo",
+		.entry = "bfifo_enqueue"
+	}
+};
+
+static inline const char* entry_point(const char* qdisc)
+{
+	u32 i;
+	for (i = 0; i < sizeof(known_entry_points) / sizeof(known_entry_points[0]); ++i)
+	{
+		if (strcmp(known_entry_points[i].qdisc, qdisc) == 0)
+		{
+			return known_entry_points[i].entry;
+		}
+	}
+
+	return NULL;
+}
 
 static char* qdisc = NULL;
 module_param(qdisc, charp, 0);
@@ -54,6 +83,17 @@ static u32 head, tail;
 
 /* log queue condition variable */
 static wait_queue_head_t waiting_queue;
+
+static int entry_handler(struct kretprobe_instance* ri, struct pt_regs* regs)
+{
+
+}
+
+static struct kretprobe qdisc_kretprobe = 
+{
+	.handler = return_handler,
+	.entry_handler = entry_handler
+};
 
 /* "open" the proc file */
 static int open_procfile(struct inode* inode, struct file* file)
@@ -87,10 +127,18 @@ static const struct file_operations fops =
 static int __init aqmprobe_entry(void)
 {
 	u32 i;
+	const char* entry;
 
+	// Validate arguments
 	if (qdisc == NULL)
 	{
 		printk(KERN_ERR "Qdisc is required\n");
+		return -EINVAL;
+	}
+
+	if ((entry = entry_point(qdisc)) == NULL)
+	{
+		printk(KERN_ERR "Unknown Qdisc: %s\n", qdisc);
 		return -EINVAL;
 	}
 
@@ -118,6 +166,7 @@ static int __init aqmprobe_entry(void)
 		return -ENOMEM;
 	}
 
+	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
 	return 0;
 }
 module_init(aqmprobe_entry);
@@ -125,6 +174,7 @@ module_init(aqmprobe_entry);
 /* Clean up the module */
 static void __exit aqmprobe_exit(void)
 {
+	printk(KERN_INFO "Unregistering probe\n");
 	remove_proc_entry(proc_name, init_net.proc_net);
 	kfree(queue);
 }
