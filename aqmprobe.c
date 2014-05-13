@@ -17,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kprobes.h>
+#include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/types.h>
 #include <net/net_namespace.h>
@@ -28,11 +29,16 @@ MODULE_VERSION("1.0");
 
 static const char proc_name[] = "aqmprobe";
 
+static char* qdisc = NULL;
+module_param(qdisc, charp, 0);
+MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
+
 /* log_entry object */
 struct log_entry
 {
 	struct sockaddr_in src;
 	struct sockaddr_in dst;
+	u16 slot;
 	u16 plen;
 	u32 qlen;
 };
@@ -46,30 +52,18 @@ static u32 queue_size __read_mostly = 4096;
 /* log queue pointers */
 static u32 head, tail;
 
-/* Atomic compare and swap
- * Should probably replace this with some Linux-way of doing it instead
- */
-static u32 cas(u32* value, u32 expected, u32 updated)
-{
-	volatile u32 *ptr = (volatile u32*) value;
-	u32 ret;
+/* log queue condition variable */
+static wait_queue_head_t waiting_queue;
 
-	asm volatile(
-			"lock;"
-			"cmpxhcgq %2, %1;"
-			"sete %0;"
-			: "=a" (ret), "+m" (*ptr)
-			: "r" (updated), "0" (expected)
-			: "memory");
-
-	return ret;
-}
-
+/* "open" the proc file */
 static int open_procfile(struct inode* inode, struct file* file)
 {
 	return 0;
 }
 
+/* Read from the proc file
+ * read log entries and output to the user space buffer
+ */
 static ssize_t read_procfile(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
 	if (buf == NULL)
@@ -92,19 +86,35 @@ static const struct file_operations fops =
 /* Initialize the module */
 static int __init aqmprobe_entry(void)
 {
+	u32 i;
+
+	if (qdisc == NULL)
+	{
+		printk(KERN_ERR "Qdisc is required\n");
+		return -EINVAL;
+	}
+
 	// Allocate memory for the log queue buffer
 	queue_size = roundup_pow_of_two(queue_size);
 	if ((queue = kcalloc(queue_size, sizeof(struct log_entry), GFP_KERNEL)) == NULL)
 	{
+		printk(KERN_ERR "Not enough memory\n");
 		return -ENOMEM;
 	}
 
-	// reset position counters
+	// reset position counters and slot markers
 	tail = head = 0;
+	for (i = 0; i < queue_size; ++i)
+	{
+		(queue + i)->slot = 0;
+	}
+
+	init_waitqueue_head(&waiting_queue);
 
 	// Create file in proc
 	if (!proc_create(proc_name, S_IRUSR, init_net.proc_net, &fops))
 	{
+		printk(KERN_ERR "Failed to create file /proc/%s\n", proc_name);
 		return -ENOMEM;
 	}
 
