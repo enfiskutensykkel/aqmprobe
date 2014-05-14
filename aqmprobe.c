@@ -116,34 +116,30 @@ static struct report* queue = NULL;
 static u32 queue_size __read_mostly = 4096;
 
 /* Report log queue pointers */
-static u32 head, tail;
-
-/* Report log queue condition variable */
-static wait_queue_head_t waiting_queue;
+static atomic_t head, tail;
 
 /* Helper function to enqueue a report entry in the report entry queue */
 static inline int enqueue(const struct report* report)
 {
-	u32 curr_tail, curr_head, prev_tail, idx;
+	u64 curr_tail, curr_head, prev_tail, idx;
 
 	do
 	{
-		curr_head = head;
-		curr_tail = tail;
+		curr_head = atomic_read(&head);
+		curr_tail = atomic_read(&tail);
 
 		if (curr_tail >= curr_head + queue_size)
 		{
 			return 0; // queue is full
 		}
 
-		prev_tail = cas(&tail, curr_tail, curr_tail + 1);
+		prev_tail = atomic_cmpxchg(&tail, curr_tail, (curr_tail + 1) & (queue_size - 1));
 	}
 	while (curr_tail == prev_tail);
 
 	idx = curr_tail & (queue_size - 1);
 	copy_report_entry(report, &queue[idx]);
 	queue[idx].slot_taken = 1;
-	wake_up(&waiting_queue);
 
 	return 1;
 }
@@ -151,10 +147,10 @@ static inline int enqueue(const struct report* report)
 /* Helper function to dequeue a report entry from the report entry queue */
 static inline int dequeue(struct report* report)
 {
-	u32 idx;
-	u32 curr_head = head;
+	u64 idx;
+	u64 curr_head = atomic_read(&head);
 
-	if (curr_head == tail)
+	if (curr_head == atomic_read(&tail))
 	{
 		return 0; // queue is empty
 	}
@@ -165,7 +161,7 @@ static inline int dequeue(struct report* report)
 	copy_report_entry(&queue[idx], report);
 
 	queue[idx].slot_taken = 0;
-	head = curr_head + 1;
+	atomic_set(&head, (curr_head + 1) & (queue_size -1));
 	
 	return 1;
 }
@@ -289,9 +285,6 @@ static int open_report_file(struct inode* inode, struct file* file)
  */
 static ssize_t read_report_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
-	int width;
-	int error = 0;
-	size_t count = 0;
 	struct report report;
 
 	if (buf == NULL)
@@ -299,27 +292,29 @@ static ssize_t read_report_file(struct file* file, char __user* buf, size_t len,
 		return -EINVAL;
 	}
 
-	while (count < len)
+	if (len < sizeof(struct report))
 	{
-		if ((error = wait_event_interruptible(waiting_queue, (tail - head) != 0)) != 0)
-		{
-			return error;
-		}
-
-		if (count + sizeof(struct report) < len)
-		{
-			if (!dequeue(&report))
-			{
-				continue;
-			}
-		}
-
-		// TODO: if (copy_to_user(buf + count, what, how_much)) { return -EFAULT; }
-		count += sizeof(struct report);
+		return 0;
 	}
 
-	// TODO: return count;
-	return 0;
+	if (!dequeue(&report))
+	{
+		return 0;
+	}
+
+	if (copy_to_user(buf, &report, sizeof(struct report)))
+	{
+		return -EFAULT;
+	}
+
+	printk(KERN_INFO "srcport=%u dstport=%u ps=%u ql=%u dropped=%d\n",
+			ntohs(report.src.sin_port),
+			ntohs(report.dst.sin_port),
+			report.packet_size,
+			report.queue_length,
+			report.dropped);
+
+	return sizeof(struct report);
 }
 
 /* proc file operations descriptor */
@@ -368,13 +363,12 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// reset position counters and slot markers
-	tail = head = 0;
+	atomic_set(&tail, 0);
+	atomic_set(&head, 0);
 	for (i = 0; i < queue_size; ++i)
 	{
 		(queue + i)->slot_taken = 0;
 	}
-
-	init_waitqueue_head(&waiting_queue);
 
 	// Create file /proc/net/aqmprobe
 	if (!proc_create(proc_name, S_IRUSR, init_net.proc_net, &fops))
