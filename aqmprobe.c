@@ -131,7 +131,7 @@ static wait_queue_head_t waiting_queue;
 static const char proc_name[] = "aqmprobe";
 
 /* Flush to user-space application */
-static u8 flush_and_exit = 0;
+static u8 flush_now = 0;
 
 
 
@@ -237,7 +237,11 @@ static int dequeue(struct report* report)
 		return 0; // queue is empty
 	}
 
-	while (queue[head].slot_taken == 0); // wait until ready
+	if (queue[head].slot_taken == 0)
+	{
+		spin_unlock_bh(&consumer_lock);
+		return 0; // wait until ready
+	}
 	copy_report_entry(&queue[head], report);
 
 	queue[head].slot_taken = 0;
@@ -270,13 +274,13 @@ static ssize_t read_report_file(struct file* file, char __user* buf, size_t len,
 
 	for (count = 0; count + sizeof(struct report) <= len; )
 	{
-		error = wait_event_interruptible(waiting_queue, flush_and_exit || dequeue(&report));
+		error = wait_event_interruptible(waiting_queue, flush_now || dequeue(&report));
 
 		if (error != 0)
 		{
 			return error;
 		}
-		else if (flush_and_exit)
+		else if (flush_now)
 		{
 			return count;
 		}
@@ -392,7 +396,7 @@ module_init(aqmprobe_entry);
 /* Clean up the module */
 static void __exit aqmprobe_exit(void)
 {
-	flush_and_exit = 1;
+	flush_now = 1;
 	wake_up_all(&waiting_queue);
 
 	remove_proc_entry(proc_name, init_net.proc_net);
