@@ -13,7 +13,7 @@ if [ -z "$iface" ]; then
 	exit 1
 fi
 
-ifaces=(`ifconfig | grep -oE "(eth[0-9]+|wlan0)"`)
+ifaces=`ifconfig | grep -oE "(eth[0-9]+|wlan0)"`
 
 for i in $ifaces __invalid__; do
 	if [ "$i" == "$iface" ]; then
@@ -23,6 +23,7 @@ done
 
 if [ "$i" == "__invalid__" ]; then
 	echo "Interface $iface not found"
+	echo "Available: $ifaces"
 	exit 1
 fi
 
