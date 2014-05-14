@@ -72,6 +72,7 @@ static inline const char* entry_point_symbol_name(const char* qdisc)
 }
 
 
+
 /* Report entry type */
 struct report
 {
@@ -86,6 +87,28 @@ struct report
 		is_tcp    : 1;		// does the packet belong to a TCP flow (if not, ignore it)
 };
 
+static inline void copy_sockaddr_in(const struct sockaddr_in* src, struct sockaddr_in* dst)
+{
+	dst->sin_family = src->sin_family;
+	dst->sin_addr.s_addr = src->sin_addr.s_addr;
+	dst->sin_port = src->sin_port;
+}
+
+/* Helper function to copy a repord entry */
+static inline void copy_report_entry(const struct report* src, struct report* dst)
+{
+	copy_sockaddr_in(&src->src, &dst->src);
+	copy_sockaddr_in(&src->dst, &dst->dst);
+
+	dst->packet_size = src->packet_size;
+	dst->queue_length = src->queue_length;
+	dst->slot_taken = src->slot_taken;
+	dst->dropped = src->dropped;
+	dst->is_tcp = src->is_tcp;
+}
+
+
+
 /* The report log queue */
 static struct report* queue = NULL;
 
@@ -98,6 +121,57 @@ static u32 head, tail;
 /* Report log queue condition variable */
 static wait_queue_head_t waiting_queue;
 
+/* Helper function to enqueue a report entry in the report entry queue */
+static inline int enqueue(const struct report* report)
+{
+	u32 curr_tail, curr_head, prev_tail, idx;
+
+	do
+	{
+		curr_head = head;
+		curr_tail = tail;
+
+		if (curr_tail >= curr_head + queue_size)
+		{
+			return 0; // queue is full
+		}
+
+		prev_tail = cas(&tail, curr_tail, curr_tail + 1);
+	}
+	while (curr_tail == prev_tail);
+
+	idx = curr_tail & (queue_size - 1);
+	copy_report_entry(report, &queue[idx]);
+	queue[idx].slot_taken = 1;
+	wake_up(&waiting_queue);
+
+	return 1;
+}
+
+/* Helper function to dequeue a report entry from the report entry queue */
+static inline int dequeue(struct report* report)
+{
+	u32 idx;
+	u32 curr_head = head;
+
+	if (curr_head == tail)
+	{
+		return 0; // queue is empty
+	}
+
+	idx = curr_head & (queue_size - 1);
+	while (queue[idx].slot_taken == 0);
+
+	copy_report_entry(&queue[idx], report);
+
+	queue[idx].slot_taken = 0;
+	head = curr_head + 1;
+	
+	return 1;
+}
+
+
+
 /* Helper function to load TCP connection information into a report entry */
 static inline int load_addr(struct report* report, struct sk_buff* skb)
 {
@@ -107,7 +181,7 @@ static inline int load_addr(struct report* report, struct sk_buff* skb)
 	ih = ip_hdr(skb);
 	if (ih->protocol != 0x06)
 	{
-		return 1;
+		return 0;
 	}
 
 	th = tcp_hdr(skb);
@@ -120,8 +194,11 @@ static inline int load_addr(struct report* report, struct sk_buff* skb)
 	report->dst.sin_addr.s_addr = ih->daddr;
 	report->dst.sin_port = th->dest;
 
-	return 0;
+	return 1;
 }
+
+
+
 
 /* Probe function on function invocation
  * Get the arguments to the probed function.
@@ -139,6 +216,7 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 	struct Qdisc* sch;
 
 #ifdef __i386__
+	// TODO: test this, not sure if arguments should be vice versa
 	skb = (struct sk_buff*) regs->ax;
 	sch = (struct Qdisc*) regs->dx;
 #else
@@ -147,22 +225,21 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 #endif
 
 	i = (struct report*) ri->data;
+	i->is_tcp = 0;
 
-	
+	// Check if packet is actually part of a TCP flow
 	if (load_addr(i, skb))
 	{
-		// Not TCP segment
-		i->is_tcp = 0;
-		return 0;
+		i->slot_taken = 0;
+		i->dropped = 1;
+		i->is_tcp = 1;
+
+		i->packet_size = skb->len;
+		i->queue_length = skb_queue_len(&sch->q);
 	}
 
-	i->slot = 0;
-	i->is_tcp = 1;
-
-	printk(KERN_INFO "src_port=%u, dst_port=%u\n", ntohs(i->src.sin_port), ntohs(i->dst.sin_port));
 	return 0;
 }
-
 
 /* Probe function on function return
  * Get the return value from the probed function.
@@ -172,13 +249,15 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 static int return_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
 	struct report* i = (struct report*) ri->data;
-	unsigned long retv = regs_return_value(regs);
 
-	i->drop = retv == NET_XMIT_DROP;
+	if (i->is_tcp)
+	{
+		i->dropped = regs_return_value(regs) == NET_XMIT_DROP;
+		return !enqueue(i);
+	}
+
 	return 0;
 }
-
-
 
 /* Function probe descriptor */
 static struct kretprobe qdisc_probe = 
@@ -188,6 +267,8 @@ static struct kretprobe qdisc_probe =
 	.data_size = sizeof(struct report),
 	.maxactive = 20,
 };
+
+
 
 /* "open" the report file handle
  *
@@ -208,11 +289,36 @@ static int open_report_file(struct inode* inode, struct file* file)
  */
 static ssize_t read_report_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
+	int width;
+	int error = 0;
+	size_t count = 0;
+	struct report report;
+
 	if (buf == NULL)
 	{
 		return -EINVAL;
 	}
 
+	while (count < len)
+	{
+		if ((error = wait_event_interruptible(waiting_queue, (tail - head) != 0)) != 0)
+		{
+			return error;
+		}
+
+		if (count + sizeof(struct report) < len)
+		{
+			if (!dequeue(&report))
+			{
+				continue;
+			}
+		}
+
+		// TODO: if (copy_to_user(buf + count, what, how_much)) { return -EFAULT; }
+		count += sizeof(struct report);
+	}
+
+	// TODO: return count;
 	return 0;
 }
 
@@ -265,12 +371,12 @@ static int __init aqmprobe_entry(void)
 	tail = head = 0;
 	for (i = 0; i < queue_size; ++i)
 	{
-		(queue + i)->slot = 0;
+		(queue + i)->slot_taken = 0;
 	}
 
 	init_waitqueue_head(&waiting_queue);
 
-	// Create file in proc
+	// Create file /proc/net/aqmprobe
 	if (!proc_create(proc_name, S_IRUSR, init_net.proc_net, &fops))
 	{
 		printk(KERN_ERR "Failed to create file /proc/%s\n", proc_name);
