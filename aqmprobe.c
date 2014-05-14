@@ -87,7 +87,7 @@ struct report
 	u16 packet_size;		// packet size (ethernet frame size)
 	u32 queue_length;		// Qdisc length
 
-	u8  slot_taken: 1,		// is this slot in use, used for queueing report entries
+	u8  entry_ready: 1,		// is this slot in use, used for queueing report entries
 		dropped   : 1; 		// was the packet dropped
 };
 
@@ -106,7 +106,7 @@ static inline void copy_report_entry(const struct report* src, struct report* ds
 
 	dst->packet_size = src->packet_size;
 	dst->queue_length = src->queue_length;
-	dst->slot_taken = src->slot_taken;
+	dst->entry_ready = src->entry_ready;
 	dst->dropped = src->dropped;
 }
 
@@ -170,7 +170,7 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 	}
 
 	spin_lock_bh(&producer_lock);
-	if (((tail - head) & (queue_size - 1)) == queue_size - 1)
+	if (((tail - head) & (queue_size - 1)) >= queue_size - 1)
 	{
 		*((struct report**) ri->data) = NULL;
 		spin_unlock_bh(&producer_lock);
@@ -178,7 +178,7 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 	}
 
 	i = &queue[tail];
-	i->slot_taken = 0;
+	i->entry_ready = 0;
 	tail = (tail + 1) & (queue_size - 1);
 	spin_unlock_bh(&producer_lock);
 
@@ -209,7 +209,7 @@ static int return_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 	if (i != NULL)
 	{
 		i->dropped = regs_return_value(regs) == NET_XMIT_DROP;
-		i->slot_taken = 1;
+		i->entry_ready = 1;
 		wake_up(&waiting_queue);
 	}
 
@@ -237,14 +237,14 @@ static int dequeue(struct report* report)
 		return 0; // queue is empty
 	}
 
-	if (queue[head].slot_taken == 0)
+	if (queue[head].entry_ready == 0)
 	{
 		spin_unlock_bh(&consumer_lock);
 		return 0; // wait until ready
 	}
 	copy_report_entry(&queue[head], report);
 
-	queue[head].slot_taken = 0;
+	queue[head].entry_ready = 0;
 	head = (head + 1) & (queue_size - 1);
 	spin_unlock_bh(&consumer_lock);
 	return 1;
@@ -373,7 +373,7 @@ static int __init aqmprobe_entry(void)
 	head = tail = 0;
 	for (i = 0; i < queue_size; ++i)
 	{
-		(queue + i)->slot_taken = 0;
+		(queue + i)->entry_ready = 0;
 	}
 
 	// Create file /proc/net/aqmprobe
