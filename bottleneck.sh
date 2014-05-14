@@ -3,6 +3,16 @@
 iface=$1
 rate=$2
 
+if [ "`whoami`" != "root" ]; then
+	echo "Must be root"
+	exit 1
+fi
+
+if [ -z "$iface" ]; then
+	echo "Usage: $0 <iface> [rate]"
+	exit 1
+fi
+
 ifaces=(`ifconfig | grep -oE "(eth[0-9]+|wlan0)"`)
 
 for i in $ifaces __invalid__; do
