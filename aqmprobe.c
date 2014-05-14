@@ -32,9 +32,20 @@ MODULE_DESCRIPTION("qdisc statistics");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
+/* Qdisc argument to module */
+static char* qdisc = NULL;
+module_param(qdisc, charp, 0);
+MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
+
+/* Maximum number of concurrent events argument to module */
+static int max_active = 0;
+module_param(max_active, int, 0);
+MODULE_PARM_DESC(max_active, "Maximum number of concurrent events");
+
+/* Name of the report file (will be located under /proc/net/aqmprobe) */
 static const char proc_name[] = "aqmprobe";
 
-static struct { const char* qdisc; const char* entry; } known_entry_points[] =
+static struct { const char* qdisc; const char* entry; } known_entry_point_symbols[] =
 {
 	{
 		.qdisc = "pfifo",
@@ -46,146 +57,156 @@ static struct { const char* qdisc; const char* entry; } known_entry_points[] =
 	}
 };
 
-static inline const char* entry_point(const char* qdisc)
+static inline const char* entry_point_symbol_name(const char* qdisc)
 {
 	u32 i;
-	for (i = 0; i < sizeof(known_entry_points) / sizeof(known_entry_points[0]); ++i)
+	for (i = 0; i < sizeof(known_entry_point_symbols) / sizeof(known_entry_point_symbols[0]); ++i)
 	{
-		if (strcmp(known_entry_points[i].qdisc, qdisc) == 0)
+		if (strcmp(known_entry_point_symbols[i].qdisc, qdisc) == 0)
 		{
-			return known_entry_points[i].entry;
+			return known_entry_point_symbols[i].entry;
 		}
 	}
 
 	return NULL;
 }
 
-static char* qdisc = NULL;
-module_param(qdisc, charp, 0);
-MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
 
-static int max_active = 0;
-module_param(max_active, int, 0);
-MODULE_PARM_DESC(max_active, "Maximum number of concurrent events");
-
-/* report object */
+/* Report entry type */
 struct report
 {
-	struct sockaddr_in src;
-	struct sockaddr_in dst;
-	u16 slot;
-	u16 plen;
-	u32 qlen;
-	u16 drop;
+	struct sockaddr_in src; // TCP source information
+	struct sockaddr_in dst;	// TCP destination information
+	
+	u16 packet_size;		// packet size (ethernet frame size)
+	u32 queue_length;		// Qdisc length
+
+	u8  slot_taken: 1,		// is this slot in use, used for queueing report entries
+		dropped   : 1, 		// was the packet dropped
+		is_tcp    : 1;		// does the packet belong to a TCP flow (if not, ignore it)
 };
 
-/* the report log queue */
+/* The report log queue */
 static struct report* queue = NULL;
 
-/* the report log queue size */
+/* The report log queue size */
 static u32 queue_size __read_mostly = 4096;
 
-/* report log queue pointers */
+/* Report log queue pointers */
 static u32 head, tail;
 
-/* report log queue condition variable */
+/* Report log queue condition variable */
 static wait_queue_head_t waiting_queue;
 
+/* Helper function to load TCP connection information into a report entry */
 static inline int load_addr(struct report* report, struct sk_buff* skb)
 {
 	struct iphdr* ih;
 	struct tcphdr* th;
-	struct in_addr tmp_addr;
 
 	ih = ip_hdr(skb);
-	if (ih->protocol != 8)
+	if (ih->protocol != 0x06)
 	{
-		// Not IP protocol
 		return 1;
 	}
 
 	th = tcp_hdr(skb);
 
 	report->src.sin_family = AF_INET;
-	report->dst.sin_family = AF_INET;
-
-	tmp_addr.s_addr = ih->saddr;
-	report->src.sin_addr = tmp_addr;
+	report->src.sin_addr.s_addr = ih->saddr;
 	report->src.sin_port = th->source;
 
-	tmp_addr.s_addr = ih->daddr;
-	report->dst.sin_addr = tmp_addr;
+	report->dst.sin_family = AF_INET;
+	report->dst.sin_addr.s_addr = ih->daddr;
 	report->dst.sin_port = th->dest;
 
 	return 0;
 }
 
-/* Probe function on entry
- * Get the arguments to the probed function
- * Because of Linux syscall calling convention, the arguments are in eax/rax, 
- * edx/rdx and ecx/rcx.
+/* Probe function on function invocation
+ * Get the arguments to the probed function.
  *
- * http://stackoverflow.com/questions/22686393/get-a-probed-functions-arguments-in-the-entry-handler-of-a-kretprobe
+ * Linux kernel function call convention is:
+ * 	- i386   : eax, edx, ecx, rest on the stack
+ *	- x86_64 : rdi, rsi, rdx, rcx, r8, r9, rest on the stack
+ *
+ * See: http://stackoverflow.com/questions/22686393/get-a-probed-functions-arguments-in-the-entry-handler-of-a-kretprobe
  */
-static int entry_handler(struct kretprobe_instance* ri, struct pt_regs* regs)
+static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
-	struct report* instance; 
+	struct report* i; 
 	struct sk_buff* skb;
 	struct Qdisc* sch;
 
+#ifdef __i386__
 	skb = (struct sk_buff*) regs->ax;
 	sch = (struct Qdisc*) regs->dx;
+#else
+	skb = (struct sk_buff*) regs->di;
+	sch = (struct Qdisc*) regs->si;
+#endif
 
-	instance = (struct report*) ri->data;
+	i = (struct report*) ri->data;
 
-	if (!load_addr(instance, skb))
+	
+	if (load_addr(i, skb))
 	{
 		// Not TCP segment
+		i->is_tcp = 0;
 		return 0;
 	}
 
-	instance->slot = 0;
-	printk(KERN_INFO "%d\n", ntohs(instance->dst.sin_port));
+	i->slot = 0;
+	i->is_tcp = 1;
+
+	printk(KERN_INFO "src_port=%u, dst_port=%u\n", ntohs(i->src.sin_port), ntohs(i->dst.sin_port));
 	return 0;
 }
 
 
-/* Probe function on return
+/* Probe function on function return
  * Get the return value from the probed function.
  *
  * http://www.cs.fsu.edu/~baker/devices/lxr/http/source/linux/samples/kprobes/kretprobe_example.c
  */
-static int return_handler(struct kretprobe_instance* ri, struct pt_regs* regs)
+static int return_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
-	struct report* instance = (struct report*) ri->data;
-	int retv = regs_return_value(regs);
+	struct report* i = (struct report*) ri->data;
+	unsigned long retv = regs_return_value(regs);
 
-	instance->drop = retv == NET_XMIT_DROP;
-
+	i->drop = retv == NET_XMIT_DROP;
 	return 0;
 }
 
 
 
-/* function probe descriptor */
+/* Function probe descriptor */
 static struct kretprobe qdisc_probe = 
 {
-	.handler = return_handler,
-	.entry_handler = entry_handler,
+	.handler = return_probe,
+	.entry_handler = entry_probe,
 	.data_size = sizeof(struct report),
 	.maxactive = 20,
 };
 
-/* "open" the proc file */
-static int open_procfile(struct inode* inode, struct file* file)
+/* "open" the report file handle
+ *
+ * This function is invoked when a user-space application attempts to open
+ * the report file.
+ *
+ * The path to the file should be /proc/net/aqmprobe
+ */
+static int open_report_file(struct inode* inode, struct file* file)
 {
 	return 0;
 }
 
-/* Read from the proc file
- * read log entries and output to the user space buffer
+/* "read" from the report file
+ *
+ * This function is invoked when a user-space application attempts to read
+ * from the report file. It loads report data into a user-space buffer.
  */
-static ssize_t read_procfile(struct file* file, char __user* buf, size_t len, loff_t* ppos)
+static ssize_t read_report_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
 	if (buf == NULL)
 	{
@@ -199,10 +220,12 @@ static ssize_t read_procfile(struct file* file, char __user* buf, size_t len, lo
 static const struct file_operations fops =
 {
 	.owner = THIS_MODULE,
-	.open = open_procfile,
-	.read = read_procfile,
-	.llseek = noop_llseek,
+	.open = open_report_file,	// do dummy action on open
+	.read = read_report_file,	// load user-space buffer
+	.llseek = noop_llseek,	 	// do nothing on seek
 };
+
+
 
 /* Initialize the module */
 static int __init aqmprobe_entry(void)
@@ -216,7 +239,7 @@ static int __init aqmprobe_entry(void)
 		return -EINVAL;
 	}
 
-	if ((qdisc_probe.kp.symbol_name = entry_point(qdisc)) == NULL)
+	if ((qdisc_probe.kp.symbol_name = entry_point_symbol_name(qdisc)) == NULL)
 	{
 		printk(KERN_ERR "Unknown Qdisc: %s\n", qdisc);
 		return -EINVAL;
@@ -261,6 +284,8 @@ static int __init aqmprobe_entry(void)
 	return 0;
 }
 module_init(aqmprobe_entry);
+
+
 
 /* Clean up the module */
 static void __exit aqmprobe_exit(void)
