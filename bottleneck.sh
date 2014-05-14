@@ -23,7 +23,6 @@ done
 
 if [ "$i" == "__invalid__" ]; then
 	echo "Interface $iface not found"
-	echo "Available: $ifaces"
 	exit 1
 fi
 

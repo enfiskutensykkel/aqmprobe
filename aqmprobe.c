@@ -26,6 +26,7 @@
 #include <net/sch_generic.h>
 #include <net/tcp.h>
 #include <asm/ptrace.h>
+#include <asm/cmpxchg.h>
 
 MODULE_AUTHOR("Jonas Sæther Markussen");
 MODULE_DESCRIPTION("qdisc statistics");
@@ -40,10 +41,14 @@ MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
 /* Maximum number of concurrent events argument to module */
 static int max_active = 0;
 module_param(max_active, int, 0);
-MODULE_PARM_DESC(max_active, "Maximum number of concurrent events");
+MODULE_PARM_DESC(max_active, "Maximum number of concurrent packet events");
 
-/* Name of the report file (will be located under /proc/net/aqmprobe) */
-static const char proc_name[] = "aqmprobe";
+/* Maximum buffer size */
+static int buffer_size = 0;
+module_param(buffer_size, int, 0);
+MODULE_PARM_DESC(buffer_size, "Maximum number of buffered packet reports");
+
+
 
 static struct { const char* qdisc; const char* entry; } known_entry_point_symbols[] =
 {
@@ -83,8 +88,7 @@ struct report
 	u32 queue_length;		// Qdisc length
 
 	u8  slot_taken: 1,		// is this slot in use, used for queueing report entries
-		dropped   : 1, 		// was the packet dropped
-		is_tcp    : 1;		// does the packet belong to a TCP flow (if not, ignore it)
+		dropped   : 1; 		// was the packet dropped
 };
 
 static inline void copy_sockaddr_in(const struct sockaddr_in* src, struct sockaddr_in* dst)
@@ -104,7 +108,6 @@ static inline void copy_report_entry(const struct report* src, struct report* ds
 	dst->queue_length = src->queue_length;
 	dst->slot_taken = src->slot_taken;
 	dst->dropped = src->dropped;
-	dst->is_tcp = src->is_tcp;
 }
 
 
@@ -116,83 +119,19 @@ static struct report* queue = NULL;
 static u32 queue_size __read_mostly = 4096;
 
 /* Report log queue pointers */
-static atomic_t head, tail;
+static u32 head, tail;
 
-/* Helper function to enqueue a report entry in the report entry queue */
-static inline int enqueue(const struct report* report)
-{
-	u64 curr_tail, curr_head, prev_tail, idx;
+/* Report log queue locks */
+static spinlock_t producer_lock, consumer_lock;
 
-	do
-	{
-		curr_head = atomic_read(&head);
-		curr_tail = atomic_read(&tail);
+/* Report log queue condition variable */
+static wait_queue_head_t waiting_queue;
 
-		if (curr_tail >= curr_head + queue_size)
-		{
-			return 0; // queue is full
-		}
+/* Name of the report file (will be located under /proc/net/aqmprobe) */
+static const char proc_name[] = "aqmprobe";
 
-		prev_tail = atomic_cmpxchg(&tail, curr_tail, (curr_tail + 1) & (queue_size - 1));
-	}
-	while (curr_tail == prev_tail);
-
-	idx = curr_tail & (queue_size - 1);
-	copy_report_entry(report, &queue[idx]);
-	queue[idx].slot_taken = 1;
-
-	return 1;
-}
-
-/* Helper function to dequeue a report entry from the report entry queue */
-static inline int dequeue(struct report* report)
-{
-	u64 idx;
-	u64 curr_head = atomic_read(&head);
-
-	if (curr_head == atomic_read(&tail))
-	{
-		return 0; // queue is empty
-	}
-
-	idx = curr_head & (queue_size - 1);
-	while (queue[idx].slot_taken == 0);
-
-	copy_report_entry(&queue[idx], report);
-
-	queue[idx].slot_taken = 0;
-	atomic_set(&head, (curr_head + 1) & (queue_size -1));
-	
-	return 1;
-}
-
-
-
-/* Helper function to load TCP connection information into a report entry */
-static inline int load_addr(struct report* report, struct sk_buff* skb)
-{
-	struct iphdr* ih;
-	struct tcphdr* th;
-
-	ih = ip_hdr(skb);
-	if (ih->protocol != 0x06)
-	{
-		return 0;
-	}
-
-	th = tcp_hdr(skb);
-
-	report->src.sin_family = AF_INET;
-	report->src.sin_addr.s_addr = ih->saddr;
-	report->src.sin_port = th->source;
-
-	report->dst.sin_family = AF_INET;
-	report->dst.sin_addr.s_addr = ih->daddr;
-	report->dst.sin_port = th->dest;
-
-	return 1;
-}
-
+/* Flush to user-space application */
+static u8 flush_and_exit = 0;
 
 
 
@@ -207,9 +146,11 @@ static inline int load_addr(struct report* report, struct sk_buff* skb)
  */
 static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
-	struct report* i; 
 	struct sk_buff* skb;
 	struct Qdisc* sch;
+	struct iphdr* ih;
+	struct tcphdr* th;
+	struct report* i;
 
 #ifdef __i386__
 	// TODO: test this, not sure if arguments should be vice versa
@@ -220,19 +161,38 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 	sch = (struct Qdisc*) regs->si;
 #endif
 
-	i = (struct report*) ri->data;
-	i->is_tcp = 0;
-
-	// Check if packet is actually part of a TCP flow
-	if (load_addr(i, skb))
+	// Check if protocol is TCP
+	ih = ip_hdr(skb);
+	if (ih->protocol != 0x06)
 	{
-		i->slot_taken = 0;
-		i->dropped = 1;
-		i->is_tcp = 1;
-
-		i->packet_size = skb->len;
-		i->queue_length = skb_queue_len(&sch->q);
+		*((struct report**) ri->data) = NULL;
+		return 0; // ignore packet
 	}
+
+	spin_lock_bh(&producer_lock);
+	if (((tail - head) & (queue_size - 1)) == queue_size - 1)
+	{
+		*((struct report**) ri->data) = NULL;
+		spin_unlock_bh(&producer_lock);
+		return 1; // queue is full
+	}
+
+	i = &queue[tail];
+	i->slot_taken = 0;
+	tail = (tail + 1) & (queue_size - 1);
+	spin_unlock_bh(&producer_lock);
+
+	*((struct report**) ri->data) = i;
+	th = tcp_hdr(skb);
+	i->src.sin_family = AF_INET;
+	i->src.sin_addr.s_addr = ih->saddr;
+	i->src.sin_port = th->source;
+	i->dst.sin_family = AF_INET;
+	i->dst.sin_addr.s_addr = ih->daddr;
+	i->dst.sin_port = th->dest;
+
+	i->packet_size = skb->len;
+	i->queue_length = skb_queue_len(&sch->q);
 
 	return 0;
 }
@@ -244,12 +204,13 @@ static int entry_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
  */
 static int return_probe(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
-	struct report* i = (struct report*) ri->data;
+	struct report* i = *((struct report**) ri->data);
 
-	if (i->is_tcp)
+	if (i != NULL)
 	{
 		i->dropped = regs_return_value(regs) == NET_XMIT_DROP;
-		return !enqueue(i);
+		i->slot_taken = 1;
+		wake_up(&waiting_queue);
 	}
 
 	return 0;
@@ -260,11 +221,85 @@ static struct kretprobe qdisc_probe =
 {
 	.handler = return_probe,
 	.entry_handler = entry_probe,
-	.data_size = sizeof(struct report),
-	.maxactive = 20,
+	.data_size = sizeof(struct report*),
+	.maxactive = 0,
 };
 
 
+
+/* Helper function to dequeue a report entry from the report entry queue */
+static int dequeue(struct report* report)
+{
+	spin_lock_bh(&consumer_lock);
+	if (tail == head)
+	{
+		spin_unlock_bh(&consumer_lock);
+		return 0; // queue is empty
+	}
+
+	while (queue[head].slot_taken == 0); // wait until ready
+	copy_report_entry(&queue[head], report);
+
+	queue[head].slot_taken = 0;
+	head = (head + 1) & (queue_size - 1);
+	spin_unlock_bh(&consumer_lock);
+	return 1;
+}
+
+
+/* "read" from the report file
+ *
+ * This function is invoked when a user-space application attempts to read
+ * from the report file. It loads report data into a user-space buffer.
+ */
+static ssize_t read_report_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
+{
+	struct report report;
+	size_t count;
+	int error;
+
+	if (buf == NULL)
+	{
+		return -EINVAL;
+	}
+
+	if (len < sizeof(struct report))
+	{
+		return 0;
+	}
+
+	for (count = 0; count + sizeof(struct report) <= len; )
+	{
+		error = wait_event_interruptible(waiting_queue, flush_and_exit || dequeue(&report));
+
+		if (error != 0)
+		{
+			return error;
+		}
+		else if (flush_and_exit)
+		{
+			return count;
+		}
+
+		if (copy_to_user(buf + count, &report, sizeof(struct report)))
+		{
+			return -EFAULT;
+		}
+
+		printk(KERN_INFO "count=%lu head=%u tail=%u srcport=%u dstport=%u ps=%u ql=%u dropped=%d\n",
+				count,
+				head, tail,
+				ntohs(report.src.sin_port),
+				ntohs(report.dst.sin_port),
+				report.packet_size,
+				report.queue_length,
+				report.dropped);
+		
+		count += sizeof(struct report);
+	}
+
+	return count;
+}
 
 /* "open" the report file handle
  *
@@ -278,52 +313,20 @@ static int open_report_file(struct inode* inode, struct file* file)
 	return 0;
 }
 
-/* "read" from the report file
- *
- * This function is invoked when a user-space application attempts to read
- * from the report file. It loads report data into a user-space buffer.
- */
-static ssize_t read_report_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
+/* "close" the report file handle */
+static int close_report_file(struct inode* inode, struct file* file)
 {
-	struct report report;
-
-	if (buf == NULL)
-	{
-		return -EINVAL;
-	}
-
-	if (len < sizeof(struct report))
-	{
-		return 0;
-	}
-
-	if (!dequeue(&report))
-	{
-		return 0;
-	}
-
-	if (copy_to_user(buf, &report, sizeof(struct report)))
-	{
-		return -EFAULT;
-	}
-
-	printk(KERN_INFO "srcport=%u dstport=%u ps=%u ql=%u dropped=%d\n",
-			ntohs(report.src.sin_port),
-			ntohs(report.dst.sin_port),
-			report.packet_size,
-			report.queue_length,
-			report.dropped);
-
-	return sizeof(struct report);
+	return 0;
 }
 
 /* proc file operations descriptor */
 static const struct file_operations fops =
 {
 	.owner = THIS_MODULE,
-	.open = open_report_file,	// do dummy action on open
-	.read = read_report_file,	// load user-space buffer
-	.llseek = noop_llseek,	 	// do nothing on seek
+	.open = open_report_file,     // increase open count
+	.release = close_report_file, // decrease open count
+	.read = read_report_file,     // load user-space buffer
+	.llseek = noop_llseek,        // do nothing on seek
 };
 
 
@@ -348,14 +351,22 @@ static int __init aqmprobe_entry(void)
 
 	if (max_active <= 0)
 	{
-		printk(KERN_ERR "Number of concurrent events must be 1 or greater\n");
+		printk(KERN_ERR "Number of concurrent packet events must be 1 or greater\n");
 		return -EINVAL;
 	}
 	qdisc_probe.maxactive = max_active;
 
+	if (buffer_size <= 10 || buffer_size > 4096)
+	{
+		printk(KERN_ERR "Number of buffered packet reports must be greater than 10 and less than 4096\n");
+		return -EINVAL;
+	}
+
+	spin_lock_init(&producer_lock);
+	spin_lock_init(&consumer_lock);
 
 	// Allocate memory for the log queue buffer
-	queue_size = roundup_pow_of_two(queue_size);
+	queue_size = roundup_pow_of_two(buffer_size);
 	if ((queue = kcalloc(queue_size, sizeof(struct report), GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Not enough memory\n");
@@ -363,8 +374,8 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// reset position counters and slot markers
-	atomic_set(&tail, 0);
-	atomic_set(&head, 0);
+	init_waitqueue_head(&waiting_queue);
+	head = tail = 0;
 	for (i = 0; i < queue_size; ++i)
 	{
 		(queue + i)->slot_taken = 0;
@@ -390,6 +401,9 @@ module_init(aqmprobe_entry);
 /* Clean up the module */
 static void __exit aqmprobe_exit(void)
 {
+	flush_and_exit = 1;
+	wake_up_all(&waiting_queue);
+
 	remove_proc_entry(proc_name, init_net.proc_net);
 	unregister_kretprobe(&qdisc_probe);
 	kfree(queue);
