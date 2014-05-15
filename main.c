@@ -1,4 +1,6 @@
 /*
+ * 	aqmprobe - A kernel module to probe Qdiscs for statistics
+ *
  *  Copyright (C) 2014 Jonas Sæther Markussen <jonassm@ifi.uio.no>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -29,7 +31,7 @@
 #include <asm/cmpxchg.h>
 
 MODULE_AUTHOR("Jonas Sæther Markussen");
-MODULE_DESCRIPTION("qdisc statistics");
+MODULE_DESCRIPTION("qdisc statistics probe");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
