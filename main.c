@@ -88,7 +88,7 @@ struct report
 	u32 queue_length;		// Qdisc length
 
 	u8  entry_ready: 1,		// is this slot in use, used for queueing report entries
-		dropped   : 1; 		// was the packet dropped
+		 dropped   : 1; 	// was the packet dropped
 };
 
 static inline void copy_sockaddr_in(const struct sockaddr_in* src, struct sockaddr_in* dst)
@@ -387,6 +387,7 @@ static int __init aqmprobe_entry(void)
 
 	printk(KERN_INFO "Probe registered on Qdisc=%s, reporting instances of %s\n", 
 			qdisc, qdisc_probe.kp.symbol_name);
+
 	return 0;
 }
 module_init(aqmprobe_entry);
