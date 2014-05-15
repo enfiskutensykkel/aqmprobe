@@ -3,7 +3,7 @@ TARGET 	:= aqmprobe
 
 ifneq ($(KERNELRELEASE),)
 	obj-m := $(TARGET).o
-	$(TARGET)-objs = main.o
+	$(TARGET)-objs = main.o message_queue.o
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 	PWD := $(shell pwd)
