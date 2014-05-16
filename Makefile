@@ -5,11 +5,11 @@ ifneq ($(KERNELRELEASE),)
 	obj-m := $(TARGET).o
 	$(TARGET)-objs = $(OBJECTS)
 else
-	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+	KDIR ?= /lib/modules/$(shell uname -r)/build
 	PWD := $(shell pwd)
+
 default: 
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
-endif
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 reload: unload load
 
@@ -20,4 +20,11 @@ load:
 	insmod $(TARGET).ko qdisc=pfifo maximum_concurrent_events=20 buffer_size=15
 
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+todo:
+	-@for file in $(OBJECTS:%.o=%.c) $(wildcard *.h); do \
+		fgrep -H -e TODO -e FIXME $$file; \
+	done; true
+
+endif
