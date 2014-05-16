@@ -1,10 +1,6 @@
 #include "file_operations.h"
 #include "message_queue.h"
-#include <linux/module.h>
-#include <linux/types.h>
-#include <linux/fs.h>
 #include <linux/sched.h>
-#include <linux/wait.h>
 
 static spinlock_t open_count_guard;
 
@@ -21,6 +17,7 @@ static int handle_open_file(struct inode* inode, struct file* file)
 	{
 		open_count = 1;
 		spin_unlock_bh(&open_count_guard);
+		printk(KERN_INFO "File open: /proc/net/%s\n", filename);
 		return 0;
 	}
 	spin_unlock_bh(&open_count_guard);
@@ -35,6 +32,7 @@ static int handle_open_file(struct inode* inode, struct file* file)
 static int handle_close_file(struct inode* inode, struct file* file)
 {
 	spin_lock_bh(&open_count_guard);
+	printk(KERN_INFO "File close: /proc/net/%s\n", filename);
 	open_count = 0;
 	spin_unlock_bh(&open_count_guard);
 
@@ -129,6 +127,7 @@ void fo_destroy(void)
 		wait_event_interruptible(destroy_signal, open_count == 0);
 	} while (1);
 
+	spin_unlock_bh(&open_count_guard);
 	remove_proc_entry(filename, init_net.proc_net);
 	printk(KERN_INFO "Removing file: /proc/net/%s\n", filename);
 }

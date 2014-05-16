@@ -17,8 +17,6 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
 #include "message_queue.h"
 #include "qdisc_probe.h"
 #include "file_operations.h"
@@ -115,14 +113,16 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// Initialize message queue
-	if (!mq_create(buffer_size))
+	if (mq_create(buffer_size))
 	{
+		printk(KERN_ERR "Failed to allocate packet event report buffer\n");
 		return -ENOMEM;
 	}
 
 	// Create report file
-	if (!fo_init())
+	if (fo_init())
 	{
+		printk(KERN_ERR "Failed to create report file\n");
 		return -ENOMEM;
 	}
 	

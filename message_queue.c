@@ -1,10 +1,6 @@
 #include "message_queue.h"
 #include <linux/sched.h>
-#include <linux/slab.h>
-#include <linux/types.h>
-#include <linux/net.h>
-#include <linux/wait.h>
-#include <asm/cmpxchg.h>
+//#include <asm/cmpxchg.h>
 
 /* The message queue */
 static struct

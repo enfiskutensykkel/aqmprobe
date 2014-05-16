@@ -1,15 +1,9 @@
 #include "qdisc_probe.h"
 #include "message_queue.h"
-#include <linux/module.h>
-#include <linux/kernel.h>
 #include <linux/kprobes.h>
-#include <linux/types.h>
-#include <linux/skbuff.h>
-#include <net/net_namespace.h>
-#include <net/pkt_sched.h>
 #include <net/sch_generic.h>
 #include <net/tcp.h>
-#include <asm/ptrace.h>
+//#include <asm/ptrace.h>
 
 
 
@@ -49,7 +43,7 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	}
 
 	// Try to reserve a message queue slot
-	if (!mq_reserve(&msg))
+	if (mq_reserve(&msg))
 	{
 		*((struct msg**) ri->data) = NULL;
 		return 1; // queue is full

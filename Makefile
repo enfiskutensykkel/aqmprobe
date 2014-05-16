@@ -1,9 +1,9 @@
-# Module arguments
 TARGET 	:= aqmprobe
+OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
 
 ifneq ($(KERNELRELEASE),)
 	obj-m := $(TARGET).o
-	$(TARGET)-objs = main.o message_queue.o qdisc_probe.o file_operations.o
+	$(TARGET)-objs = $(OBJECTS)
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 	PWD := $(shell pwd)
@@ -16,7 +16,7 @@ reload: unload load
 unload:
 	-rmmod $(TARGET).ko
 
-load:
+load: 
 	insmod $(TARGET).ko qdisc=pfifo maximum_concurrent_events=20 buffer_size=15
 
 clean:

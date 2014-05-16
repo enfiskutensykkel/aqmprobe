@@ -4,7 +4,6 @@
 #ifndef __AQMPROBE_MQ_H__
 #define __AQMPROBE_MQ_H__
 
-#include <linux/types.h>
 #include <net/net_namespace.h>
 
 struct msg

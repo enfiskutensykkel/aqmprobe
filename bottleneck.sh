@@ -31,7 +31,7 @@ if [ -z "$rate" ]; then
 	rate=200kbit
 fi
 
-sysctl -w kernel.panic=20
+sysctl -w kernel.panic=40
 tc qdisc del dev $iface root
 tc qdisc add dev $iface root handle 1: htb default 10
 tc class add dev $iface parent 1: classid 1:10 htb rate $rate ceil $rate burst 1520
