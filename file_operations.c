@@ -24,6 +24,7 @@ static int handle_open_file(struct inode* inode, struct file* file)
 
 	// File was already opened
 	printk(KERN_NOTICE "Trying to open busy file: /proc/net/%s\n", filename);
+	mq_signal_waiting();
 	return -EBUSY;
 }
 
