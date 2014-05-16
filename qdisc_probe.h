@@ -5,6 +5,6 @@
 void qp_attach(const char* symbol, int max_events);
 
 /* Unregister the kprobe */
-void qp_detach(void);
+int qp_detach(void);
 
 #endif

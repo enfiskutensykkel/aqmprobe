@@ -21,6 +21,7 @@ static struct
 int mq_create(size_t size)
 {
 	struct msg* queue;
+	size_t i;
 
 	size = roundup_pow_of_two(size);
 	if ((queue = kcalloc(size, sizeof(struct msg), GFP_KERNEL)) == NULL)
@@ -34,6 +35,12 @@ int mq_create(size_t size)
 	mq.size = size;
 	mq.qptr = queue;
 	init_waitqueue_head(&mq.wait);
+
+	for (i = 0; i < size; ++i)
+	{
+		mq.qptr[i].mark = 0;
+	}
+
 	return 0;
 }
 
