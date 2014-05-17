@@ -46,7 +46,9 @@ void mq_destroy(void)
 {
 	if (mq.tail != mq.head)
 	{
-		printk(KERN_ERR "Race condition: queue is not empty on destroy");
+#ifdef DEBUG
+		printk(KERN_ERR "mq_destroy: queue is not empty on destroy");
+#endif
 	}
 
 	kfree(mq.qptr);
@@ -116,10 +118,12 @@ int mq_dequeue(struct msg* buf)
 		return 1;
 	}
 
+#ifdef DEBUG
 	if (mq.qptr[mq.head].mark == 0)
 	{
-		printk(KERN_ERR "Race condition: dequeuing an unready message\n");
+		printk(KERN_ERR "mq_dequeue: dequeuing an unready message\n");
 	}
+#endif
 
 	mq.qptr[mq.head].mark = 0;
 	*buf = mq.qptr[mq.head];

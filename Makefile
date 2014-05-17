@@ -2,6 +2,7 @@ TARGET 	:= aqmprobe
 OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
 
 ifneq ($(KERNELRELEASE),)
+	CFLAGS_EXTRA += -DDEBUG
 	obj-m := $(TARGET).o
 	$(TARGET)-objs = $(OBJECTS)
 else
