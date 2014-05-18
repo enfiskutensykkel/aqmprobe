@@ -10,11 +10,13 @@ static struct
 	                   size; // the total capacity of the queue
 	struct msg*        qptr; // pointer to the actual queue
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
-	u16                fcnt; // flush counter
+	u16                fcnt, // flush counter
+					   frst; // flush counter reset value
 } mq;
 
 
-int mq_create(size_t size)
+
+int mq_create(size_t size, u16 flush_count)
 {
 	struct msg* queue;
 	size_t i;
@@ -27,7 +29,7 @@ int mq_create(size_t size)
 	}
 
 	mq.head = mq.tail = 0;
-	mq.fcnt = -1;
+	mq.fcnt = mq.frst = flush_count;
 	mq.size = size;
 	mq.qptr = queue;
 	init_waitqueue_head(&mq.wait);
@@ -44,12 +46,12 @@ int mq_create(size_t size)
 
 void mq_destroy(void)
 {
+#ifdef DEBUG
 	if (mq.tail != mq.head)
 	{
-#ifdef DEBUG
-		printk(KERN_ERR "mq_destroy: queue is not empty on destroy");
-#endif
+		printk(KERN_DEBUG "mq_destroy: queue is not empty on destroy");
 	}
+#endif
 
 	kfree(mq.qptr);
 }
@@ -69,18 +71,20 @@ int mq_reserve(struct msg** slot)
 		if (((tail - head) & size) >= size)
 		{
 			*slot = NULL;
+			wake_up(&mq.wait);
 			return -1;
 		}
 
 #ifdef __i386__
-		// TODO: This needs to be tested
 		prev = cmpxchg_local(&mq.tail, tail, (tail + 1) & size);
 #else
 		prev = cmpxchg64_local(&mq.tail, tail, (tail + 1) & size);
 #endif
+
 	}
 	while (prev == mq.tail);
 
+	*slot = mq.qptr + prev;
 	return 0;
 }
 
@@ -110,11 +114,20 @@ int mq_dequeue(struct msg* buf)
 
 	if (error != 0)
 	{
+		printk(KERN_ERR "Unexpected error: %d\n", error);
 		return error;
+	}
+
+	if (mq.fcnt-- == 0)
+	{
+		mq.fcnt = mq.frst;
 	}
 
 	if (mq.head == mq.tail)
 	{
+#ifdef DEBUG
+		printk(KERN_DEBUG "mq_dequeue: flushing queue\n");
+#endif
 		return 1;
 	}
 

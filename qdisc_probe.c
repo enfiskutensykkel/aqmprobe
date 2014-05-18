@@ -28,13 +28,6 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 #ifdef __i386__
 	skb = (struct sk_buff*) regs->ax;
 	sch = (struct Qdisc*) regs->dx;
-
-	printk(KERN_INFO "skb=%p sch=%p\n", skb, sch);
-	
-	printk(KERN_INFO "qdisc len=%d\n", skb_queue_len(&sch->q));
-
-	*((struct msg**) ri->data) = NULL;
-	return 1;
 #else
 	skb = (struct sk_buff*) regs->di;
 	sch = (struct Qdisc*) regs->si;
@@ -44,16 +37,19 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	ih = ip_hdr(skb);
 	if (ih->protocol != 6)
 	{
+		// Ignore non-TCP packet
 		*((struct msg**) ri->data) = NULL;
-		return 1; // ignore packet
+		return 0; 
 	}
 
 	// Try to reserve a message queue slot
 	if (mq_reserve(&msg))
 	{
+		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
-		return 1; // queue is full
+		return 0; 
 	}
+
 	*((struct msg**) ri->data) = msg;
 
 	// Set message data
@@ -81,17 +77,13 @@ static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* reg
 {
 	struct msg* msg = *((struct msg**) ri->data);
 	
-#ifdef DEBUG
-	if (msg == NULL)
+	if (msg != NULL)
 	{
-		printk(KERN_ERR "handle_func_return: This shouldn't happen");
-		return 0;
+		// FIXME: Return value might be in regs->orig_eax
+		msg->drop = regs_return_value(regs) == NET_XMIT_DROP;
+		mq_enqueue(msg);
 	}
-#endif
 
-	// FIXME: Return value might be in regs->orig_eax
-	msg->drop = regs_return_value(regs) == NET_XMIT_DROP;
-	mq_enqueue(msg);
 	return 0;
 }
 

@@ -6,8 +6,6 @@ static spinlock_t open_count_guard;
 
 static int open_count __read_mostly = 0;
 
-static wait_queue_head_t destroy_signal;
-
 
 
 static int handle_open_file(struct inode* inode, struct file* file)
@@ -23,7 +21,9 @@ static int handle_open_file(struct inode* inode, struct file* file)
 	spin_unlock_bh(&open_count_guard);
 
 	// File was already opened
-	printk(KERN_NOTICE "Trying to open busy file: /proc/net/%s\n", filename);
+#ifdef DEBUG
+	printk(KERN_DEBUG "Forcing flush of busy file: /proc/net/%s\n", filename);
+#endif
 	mq_signal_waiting();
 	return -EBUSY;
 }
@@ -36,8 +36,6 @@ static int handle_close_file(struct inode* inode, struct file* file)
 	printk(KERN_INFO "File close: /proc/net/%s\n", filename);
 	open_count = 0;
 	spin_unlock_bh(&open_count_guard);
-
-	wake_up_all(&destroy_signal);
 	return 0;
 }
 
@@ -66,7 +64,9 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len,
 
 		if (err != 0)
 		{
-			printk(KERN_INFO "Flushing file\n");
+#ifdef DEBUG
+			printk(KERN_DEBUG "Flushing file: /proc/net/%s\n", filename);
+#endif
 			return err < 0 ? err : count;
 		}
 
@@ -96,7 +96,6 @@ static const struct file_operations fo_file_operations =
 int fo_init(void)
 {
 	spin_lock_init(&open_count_guard);
-	init_waitqueue_head(&destroy_signal);
 
 	if (!proc_create(filename, S_IRUSR, init_net.proc_net, &fo_file_operations))
 	{
@@ -124,8 +123,6 @@ void fo_destroy(void)
 		}
 		spin_unlock_bh(&open_count_guard);
 
-		// Wait until signalled
-		wait_event_interruptible(destroy_signal, open_count == 0);
 	} while (1);
 
 	spin_unlock_bh(&open_count_guard);

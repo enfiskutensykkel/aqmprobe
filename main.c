@@ -36,7 +36,7 @@ module_param(qdisc, charp, 0);
 MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
 
 /* Maximum number of concurrent packet events argument to module */
-static int maximum_concurrent_events = 0;
+static int maximum_concurrent_events = 60;
 module_param(maximum_concurrent_events, int, 0);
 MODULE_PARM_DESC(maximum_concurrent_events, "Maximum number of concurrent packet events handled");
 
@@ -44,6 +44,11 @@ MODULE_PARM_DESC(maximum_concurrent_events, "Maximum number of concurrent packet
 static int buffer_size = 0;
 module_param(buffer_size, int, 0);
 MODULE_PARM_DESC(buffer_size, "Maximum number of buffered packet event reports");
+
+/* Flush frequency */
+static int flush_frequency = 1024;
+module_param(flush_frequency, int, 0);
+MODULE_PARM_DESC(flush_freq, "Number of buffered packet event reports before triggering file flush");
 
 /* Report file */
 const char filename[] = "aqmprobe";
@@ -108,12 +113,18 @@ static int __init aqmprobe_entry(void)
 
 	if (buffer_size <= 10 || buffer_size > 4096)
 	{
-		printk(KERN_ERR "Number of buffered packet event reports must be greater than 10 and less than 4096\n");
+		printk(KERN_ERR "Number of buffered packet event reports must be in range [10-4096]\n");
+		return -EINVAL;
+	}
+
+	if (flush_frequency < 1 || flush_frequency >= 65536)
+	{
+		printk(KERN_ERR "Number of buffered packet event reports before triggering file flush must be in range [1-65536]\n");
 		return -EINVAL;
 	}
 
 	// Initialize message queue
-	if (mq_create(buffer_size))
+	if (mq_create(buffer_size, flush_frequency))
 	{
 		printk(KERN_ERR "Failed to allocate packet event report buffer\n");
 		return -ENOMEM;
@@ -129,7 +140,11 @@ static int __init aqmprobe_entry(void)
 	// Attach probe
 	qp_attach(entry_point, maximum_concurrent_events);
 
+#ifdef DEBUG
+	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d buf_size=%d)\n", qdisc, flush_frequency, buffer_size);
+#else
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
+#endif
 
 	return 0;
 }

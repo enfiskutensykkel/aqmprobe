@@ -20,7 +20,7 @@ struct msg
 
 
 /* Allocate and initialize the message queue */
-int mq_create(size_t size);
+int mq_create(size_t size, u16 flush_count);
 
 
 

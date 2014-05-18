@@ -1,8 +1,10 @@
 TARGET 	:= aqmprobe
 OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
+QDISC   := pfifo
+MODARGS := buffer_size=15 maximum_concurrent_events=20 flush_frequency=20
 
 ifneq ($(KERNELRELEASE),)
-	CFLAGS_EXTRA += -DDEBUG
+	ccflags-y += -DDEBUG
 	obj-m := $(TARGET).o
 	$(TARGET)-objs = $(OBJECTS)
 else
@@ -17,8 +19,8 @@ reload: unload load
 unload:
 	-rmmod $(TARGET).ko
 
-load: 
-	insmod $(TARGET).ko qdisc=pfifo maximum_concurrent_events=20 buffer_size=15
+load:
+	insmod $(TARGET).ko qdisc=$(QDISC) $(MODARGS)
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
