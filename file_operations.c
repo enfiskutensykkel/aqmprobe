@@ -64,9 +64,7 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len,
 
 		if (err != 0)
 		{
-#ifdef DEBUG
-			printk(KERN_DEBUG "Flushing file: /proc/net/%s\n", filename);
-#endif
+			// Force flush file
 			return err < 0 ? err : count;
 		}
 

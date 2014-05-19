@@ -1,7 +1,7 @@
 TARGET 	:= aqmprobe
 OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
 QDISC   := pfifo
-MODARGS := buffer_size=15 maximum_concurrent_events=20 flush_frequency=20
+MODARGS := buffer_size=4096 maximum_concurrent_events=40 flush_frequency=2000
 
 ifneq ($(KERNELRELEASE),)
 	ccflags-y += -DDEBUG
@@ -20,7 +20,7 @@ unload:
 	-rmmod $(TARGET).ko
 
 load:
-	insmod $(TARGET).ko qdisc=$(QDISC) $(MODARGS)
+	insmod $(TARGET).ko filename=$(QDISC) qdisc=$(QDISC) $(MODARGS)
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean

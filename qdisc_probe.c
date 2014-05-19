@@ -53,10 +53,6 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
 		atomic_inc(&miss_counter);
-
-#ifdef DEBUG
-		printk(KERN_WARNING "handle_func_invoke: Packet event report buffer is full\n");
-#endif
 		return 0; 
 	}
 

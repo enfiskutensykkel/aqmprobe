@@ -82,11 +82,10 @@ int mq_reserve(struct msg** slot)
 #else
 		prev = cmpxchg64(&mq.tail, tail, (tail + 1) & size);
 #endif
-
 	}
-	while (prev == tail);
+	while (prev != tail);
 
-	*slot = mq.qptr + prev;
+	*slot = mq.qptr + tail;
 	return 0;
 }
 
@@ -125,20 +124,10 @@ int mq_dequeue(struct msg* buf)
 		mq.fcnt = mq.frst;
 	}
 
-	if (mq.head == mq.tail)
+	if (mq.head == mq.tail || !mq.qptr[mq.head].mark)
 	{
-#ifdef DEBUG
-		printk(KERN_DEBUG "mq_dequeue: flushing queue\n");
-#endif
 		return 1;
 	}
-
-#ifdef DEBUG
-	if (mq.qptr[mq.head].mark == 0)
-	{
-		printk(KERN_ERR "mq_dequeue: dequeuing an unready message\n");
-	}
-#endif
 
 	mq.qptr[mq.head].mark = 0;
 	*buf = mq.qptr[mq.head];
