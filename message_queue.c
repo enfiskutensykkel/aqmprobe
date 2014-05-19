@@ -84,7 +84,7 @@ int mq_reserve(struct msg** slot)
 #endif
 
 	}
-	while (prev == mq.tail);
+	while (prev == tail);
 
 	*slot = mq.qptr + prev;
 	return 0;

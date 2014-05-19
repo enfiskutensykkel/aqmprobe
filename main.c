@@ -48,10 +48,12 @@ MODULE_PARM_DESC(buffer_size, "Maximum number of buffered packet event reports")
 /* Flush frequency */
 static int flush_frequency = 1024;
 module_param(flush_frequency, int, 0);
-MODULE_PARM_DESC(flush_freq, "Number of buffered packet event reports before triggering file flush");
+MODULE_PARM_DESC(flush_frequency, "Number of buffered packet event reports before triggering file flush");
 
-/* Report file */
-const char filename[] = "aqmprobe";
+/* Report file name */
+char* filename = "aqmprobe";
+module_param(filename, charp, 0);
+MODULE_PARM_DESC(filename, "Filename of the report file");
 
 
 
