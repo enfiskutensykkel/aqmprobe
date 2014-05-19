@@ -1,6 +1,7 @@
 #include "message_queue.h"
 #include <linux/sched.h>
-//#include <asm/cmpxchg.h>
+
+
 
 /* The message queue */
 static struct
@@ -63,6 +64,7 @@ int mq_reserve(struct msg** slot)
 	size_t head, tail, prev, size;
 	size = mq.size - 1;
 
+	// FIXME: Use cmpxchg on atomic types instead?
 	do
 	{
 		head = mq.head;
@@ -76,9 +78,9 @@ int mq_reserve(struct msg** slot)
 		}
 
 #ifdef __i386__
-		prev = cmpxchg_local(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg(&mq.tail, tail, (tail + 1) & size);
 #else
-		prev = cmpxchg64_local(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg64(&mq.tail, tail, (tail + 1) & size);
 #endif
 
 	}

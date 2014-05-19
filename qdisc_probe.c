@@ -3,7 +3,12 @@
 #include <linux/kprobes.h>
 #include <net/sch_generic.h>
 #include <net/tcp.h>
-//#include <asm/ptrace.h>
+#include <linux/atomic.h>
+
+
+
+/* Count number of events we have to discard because the message queue is full */
+static atomic_t miss_counter;
 
 
 
@@ -47,7 +52,11 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	{
 		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
-		printk(KERN_WARNING "Packet event report buffer is full\n");
+		atomic_inc(&miss_counter);
+
+#ifdef DEBUG
+		printk(KERN_WARNING "handle_func_invoke: Packet event report buffer is full\n");
+#endif
 		return 0; 
 	}
 
@@ -102,6 +111,7 @@ static struct kretprobe qp_qdisc_probe =
 
 void qp_attach(const char* symbol, int max_events)
 {
+	atomic_set(&miss_counter, 0);
 	qp_qdisc_probe.maxactive = max_events;
 	qp_qdisc_probe.kp.symbol_name = symbol;
 	register_kretprobe(&qp_qdisc_probe);
@@ -112,5 +122,5 @@ void qp_attach(const char* symbol, int max_events)
 int qp_detach(void)
 {
 	unregister_kretprobe(&qp_qdisc_probe);
-	return qp_qdisc_probe.nmissed;
+	return qp_qdisc_probe.nmissed + atomic_read(&miss_counter);
 }
