@@ -7,10 +7,6 @@
 
 
 
-static u64 missed = 0;
-
-
-
 /* Probe function on function invocation
  * Get the arguments to the probed function.
  *
@@ -51,7 +47,7 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	{
 		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
-		//++missed; // TODO: Do we need to protect this and do it atomically?
+		printk(KERN_WARNING "Packet event report buffer is full\n");
 		return 0; 
 	}
 
@@ -106,7 +102,6 @@ static struct kretprobe qp_qdisc_probe =
 
 void qp_attach(const char* symbol, int max_events)
 {
-	missed = 0;
 	qp_qdisc_probe.maxactive = max_events;
 	qp_qdisc_probe.kp.symbol_name = symbol;
 	register_kretprobe(&qp_qdisc_probe);
@@ -117,5 +112,5 @@ void qp_attach(const char* symbol, int max_events)
 int qp_detach(void)
 {
 	unregister_kretprobe(&qp_qdisc_probe);
-	return qp_qdisc_probe.nmissed + missed;
+	return qp_qdisc_probe.nmissed;
 }

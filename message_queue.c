@@ -11,7 +11,7 @@ static struct
 	struct msg*        qptr; // pointer to the actual queue
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
 	u16                fcnt, // flush counter
-					   frst; // flush counter reset value
+	                   frst; // flush counter reset value
 } mq;
 
 

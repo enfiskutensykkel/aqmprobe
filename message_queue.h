@@ -9,7 +9,7 @@
 struct msg
 {
 	struct sockaddr_in  src, // source address      (src IP + src port)
-					    dst; // destination address (dst IP + dst port)
+	                    dst; // destination address (dst IP + dst port)
 
 	u32                qlen; // the length of the qdisc when packet was intercepted
 	u16                plen; // the size of the intercepted packet
