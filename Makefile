@@ -23,7 +23,11 @@ load:
 	insmod $(TARGET).ko filename=$(QDISC) qdisc=$(QDISC) $(MODARGS)
 
 clean:
+	-rm analyzer
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+analyzer:
+	g++ -Wall -Wextra -pedantic -o $@ analyzer.cpp
 
 todo:
 	-@for file in $(OBJECTS:%.o=%.c) $(wildcard *.h); do \
