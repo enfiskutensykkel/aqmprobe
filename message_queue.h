@@ -4,7 +4,6 @@
 #ifndef __AQMPROBE_MQ_H__
 #define __AQMPROBE_MQ_H__
 
-#include <linux/types.h>
 #include <net/net_namespace.h>
 
 
@@ -25,7 +24,7 @@ struct msg
 
 
 /* Allocate and initialize the message queue */
-int mq_create(size_t size, qdisc_len);
+int mq_create(size_t size, size_t qdisc_length, u16 flush_count);
 
 
 

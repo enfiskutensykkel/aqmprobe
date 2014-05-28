@@ -1,10 +1,7 @@
 #include "message_queue.h"
 #include <linux/sched.h>
-#include <linux/slab.h>
-#include <linux/types.h>
-#include <linux/net.h>
-#include <linux/wait.h>
-#include <asm/cmpxchg.h>
+
+
 
 /* The message queue */
 static struct
@@ -15,24 +12,25 @@ static struct
                        qlen; // length of a full qdisc
 	struct msg*        qptr; // pointer to the actual queue
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
-	u16                fcnt; // flush counter
+	u16                fcnt, // flush counter
+	                   frst; // flush counter reset value
 } mq;
 
 
-int mq_create(size_t size, size_t len)
+int mq_create(size_t size, size_t len, u16 flush_count)
 {
 	struct msg* queue;
 	size_t i;
 
 	size = roundup_pow_of_two(size);
-	if ((queue = kcalloc(size, sizeof(struct msg) + sizeof(pkt) * len, GFP_KERNEL)) == NULL)
+	if ((queue = kcalloc(size, sizeof(struct msg) + sizeof(struct pkt) * len, GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for message queue\n");
 		return -ENOMEM;
 	}
 
 	mq.head = mq.tail = 0;
-	mq.fcnt = -1;
+	mq.fcnt = mq.frst = flush_count;
 	mq.size = size;
 	mq.qlen = len;
 	mq.qptr = queue;
@@ -50,10 +48,12 @@ int mq_create(size_t size, size_t len)
 
 void mq_destroy(void)
 {
+#ifdef DEBUG
 	if (mq.tail != mq.head)
 	{
-		printk(KERN_ERR "Race condition: queue is not empty on destroy");
+		printk(KERN_DEBUG "mq_destroy: queue is not empty on destroy");
 	}
+#endif
 
 	kfree(mq.qptr);
 }
@@ -65,6 +65,7 @@ int mq_reserve(struct msg** slot)
 	size_t head, tail, prev, size;
 	size = mq.size - 1;
 
+	// FIXME: Use cmpxchg on atomic types instead?
 	do
 	{
 		head = mq.head;
@@ -73,18 +74,19 @@ int mq_reserve(struct msg** slot)
 		if (((tail - head) & size) >= size)
 		{
 			*slot = NULL;
+			wake_up(&mq.wait);
 			return -1;
 		}
 
 #ifdef __i386__
-		// TODO: This needs to be tested
-		prev = cmpxchg_local(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg(&mq.tail, tail, (tail + 1) & size);
 #else
-		prev = cmpxchg64_local(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg64(&mq.tail, tail, (tail + 1) & size);
 #endif
 	}
-	while (prev == mq.tail);
+	while (prev != tail);
 
+	*slot = mq.qptr + tail;
 	return 0;
 }
 
@@ -114,17 +116,18 @@ int mq_dequeue(struct msg* buf)
 
 	if (error != 0)
 	{
+		printk(KERN_ERR "Unexpected error: %d\n", error);
 		return error;
 	}
 
-	if (mq.head == mq.tail)
+	if (mq.fcnt-- == 0)
 	{
-		return 1;
+		mq.fcnt = mq.frst;
 	}
 
-	if (mq.qptr[mq.head].mark == 0)
+	if (mq.head == mq.tail || !mq.qptr[mq.head].mark)
 	{
-		printk(KERN_ERR "Race condition: dequeuing an unready message\n");
+		return 1;
 	}
 
 	mq.qptr[mq.head].mark = 0;

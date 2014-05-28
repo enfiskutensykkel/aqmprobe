@@ -1,7 +1,7 @@
 #ifndef __AQMPROBE_FO_H__
 #define __AQMPROBE_FO_H__
 
-extern const char filename[];
+extern char* filename;
 
 
 

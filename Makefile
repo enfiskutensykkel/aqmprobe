@@ -1,15 +1,18 @@
-# Module arguments
 TARGET 	:= aqmprobe
+OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
+QDISC   := pfifo
+MODARGS := buffer_size=4096 maximum_concurrent_events=40 flush_frequency=2000
 
 ifneq ($(KERNELRELEASE),)
+	ccflags-y += -DDEBUG
 	obj-m := $(TARGET).o
-	$(TARGET)-objs = main.o message_queue.o qdisc_probe.o file_operations.o
+	$(TARGET)-objs = $(OBJECTS)
 else
-	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+	KDIR ?= /lib/modules/$(shell uname -r)/build
 	PWD := $(shell pwd)
+
 default: 
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
-endif
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 reload: unload load
 
@@ -17,7 +20,18 @@ unload:
 	-rmmod $(TARGET).ko
 
 load:
-	insmod $(TARGET).ko qdisc=pfifo maximum_concurrent_events=20 buffer_size=15
+	insmod $(TARGET).ko filename=$(QDISC) qdisc=$(QDISC) $(MODARGS)
 
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	-rm analyzer
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+
+analyzer:
+	g++ -Wall -Wextra -pedantic -o $@ analyzer.cpp
+
+todo:
+	-@for file in $(OBJECTS:%.o=%.c) $(wildcard *.h); do \
+		fgrep -H -e TODO -e FIXME $$file; \
+	done; true
+
+endif

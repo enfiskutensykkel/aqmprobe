@@ -17,8 +17,6 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/types.h>
 #include "message_queue.h"
 #include "qdisc_probe.h"
 #include "file_operations.h"
@@ -47,14 +45,18 @@ MODULE_PARM_DESC(qdisc_len, "Maximum number of packets enqueued in the qdisc");
 
 
 static int buf_len = 0;
-module_param(buffer_size, int, 0);
+module_param(buf_len, int, 0);
 MODULE_PARM_DESC(buf_len, "Number of buffered event reports before discarding");
 
 
+static int flush_frequency = 1024;
+module_param(flush_frequency, int, 0);
+MODULE_PARM_DESC(flush_frequency, "Number of buffered event reports before triggering file flush");
 
 
-/* Report file */
-const char filename[] = "aqmprobe";
+char* filename = "aqmprobe";
+module_param(filename, charp, 0);
+MODULE_PARM_DESC(filename, "Filename of the report file");
 
 
 
@@ -116,33 +118,45 @@ static int __init aqmprobe_entry(void)
 
 	if (buf_len <= 10 || buf_len > 4096)
 	{
-		printk(KERN_ERR "Number of buffered event reports must be greater than 10 and less than 4096\n");
+		printk(KERN_ERR "Number of buffered event reports must be in range [10-4096]\n");
 		return -EINVAL;
 	}
 
 
 	if (qdisc_len == 0 || qdisc_len > 1000)
 	{
-		printk(KERN_ERR "Number of possible enqueued packets must greater than 0 and less than 1000");
+		printk(KERN_ERR "Number of possible enqueued packets must be in range [1-1000]\n");
+		return -EINVAL;
+	}
+
+	if (flush_frequency < 1 || flush_frequency >= 65536)
+	{
+		printk(KERN_ERR "Number of buffered packet event reports before triggering file flush must be in range [1-65536]\n");
 		return -EINVAL;
 	}
 
 	// Initialize message queue
-	if (!mq_create(buf_len, qdisc_len))
+	if (mq_create(buf_len, qdisc_len, flush_frequency))
 	{
+		printk(KERN_ERR "Failed to allocate event report buffer\n");
 		return -ENOMEM;
 	}
 
 	// Create report file
-	if (!fo_init())
+	if (fo_init())
 	{
+		printk(KERN_ERR "Failed to create report file\n");
 		return -ENOMEM;
 	}
 	
 	// Attach probe
 	qp_attach(entry_point, concurrent_evts);
 
+#ifdef DEBUG
+	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d qdisc_len=%d buf_size=%d)\n", qdisc, flush_frequency, qdisc_len, buf_len);
+#else
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
+#endif
 
 	return 0;
 }

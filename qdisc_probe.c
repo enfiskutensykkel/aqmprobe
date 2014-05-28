@@ -1,15 +1,14 @@
 #include "qdisc_probe.h"
 #include "message_queue.h"
-#include <linux/module.h>
-#include <linux/kernel.h>
 #include <linux/kprobes.h>
-#include <linux/types.h>
-#include <linux/skbuff.h>
-#include <net/net_namespace.h>
-#include <net/pkt_sched.h>
 #include <net/sch_generic.h>
 #include <net/tcp.h>
-#include <asm/ptrace.h>
+#include <linux/atomic.h>
+
+
+
+/* Count number of events we have to discard because the message queue is full */
+static atomic_t miss_counter;
 
 
 
@@ -32,7 +31,6 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 
 	// Extract function arguments from registers
 #ifdef __i386__
-	// TODO: This needs to be tested
 	skb = (struct sk_buff*) regs->ax;
 	sch = (struct Qdisc*) regs->dx;
 #else
@@ -44,16 +42,20 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	ih = ip_hdr(skb);
 	if (ih->protocol != 6)
 	{
+		// Ignore non-TCP packet
 		*((struct msg**) ri->data) = NULL;
-		return 1; // ignore packet
+		return 0; 
 	}
 
 	// Try to reserve a message queue slot
-	if (!mq_reserve(&msg))
+	if (mq_reserve(&msg))
 	{
+		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
-		return 1; // queue is full
+		atomic_inc(&miss_counter);
+		return 0; 
 	}
+
 	*((struct msg**) ri->data) = msg;
 
 	// Set message data
@@ -80,8 +82,14 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
 	struct msg* msg = *((struct msg**) ri->data);
-	msg->drop = regs_return_value(regs) == NET_XMIT_DROP;
-	mq_enqueue(msg);
+	
+	if (msg != NULL)
+	{
+		// FIXME: Return value might be in regs->orig_eax
+		msg->drop = regs_return_value(regs) == NET_XMIT_DROP;
+		mq_enqueue(msg);
+	}
+
 	return 0;
 }
 
@@ -99,6 +107,7 @@ static struct kretprobe qp_qdisc_probe =
 
 void qp_attach(const char* symbol, int max_events)
 {
+	atomic_set(&miss_counter, 0);
 	qp_qdisc_probe.maxactive = max_events;
 	qp_qdisc_probe.kp.symbol_name = symbol;
 	register_kretprobe(&qp_qdisc_probe);
@@ -109,5 +118,5 @@ void qp_attach(const char* symbol, int max_events)
 int qp_detach(void)
 {
 	unregister_kretprobe(&qp_qdisc_probe);
-	return qp_qdisc_probe.nmissed;
+	return qp_qdisc_probe.nmissed + atomic_read(&miss_counter);
 }
