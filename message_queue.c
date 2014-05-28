@@ -141,10 +141,12 @@ void mq_signal_waiting(void)
 int mq_dequeue(struct msg* buf, size_t len)
 {
 	int error;
+	int cont;
 
 	do
 	{
 		error = wait_event_interruptible(mq.wait, !mq.fcnt || (mq.head != mq.tail && MSG(mq.head)->mark));
+		cont = MSG(mq.head)->mark == 2;
 
 		if (error != 0)
 		{
@@ -162,13 +164,12 @@ int mq_dequeue(struct msg* buf, size_t len)
 			return 1;
 		}
 
+		msg_copy(MSG(mq.head), buf, len);
+		MSG(mq.head)->mark = 0;
+		mq.head = (mq.head + 1) & (mq.size - 1);
+
 	}
-	while (MSG(mq.head)->mark == 2);
-
-	msg_copy(MSG(mq.head), buf, len);
-
-	MSG(mq.head)->mark = 0;
-	mq.head = (mq.head + 1) & (mq.size - 1);
+	while (cont);
 
 	return 0;
 }
