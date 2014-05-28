@@ -10,20 +10,42 @@ static struct
 	                   tail, // pointer to the last element in the queue
 	                   size, // the total capacity of the queue
                        qlen; // length of a full qdisc
-	struct msg*        qptr; // pointer to the actual queue
+	char*              buff; // pointer to the report buffer
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
 	u16                fcnt, // flush counter
 	                   frst; // flush counter reset value
 } mq;
 
 
+
+#define MSG(pos) ((struct msg*) (mq.buff + (sizeof(struct msg) + sizeof(struct pkt) * mq.qlen) * (pos)))
+
+
+
+static inline msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
+{
+	const size_t n = (pkts < src->queue_len ? pkts : src->queue_len)
+	size_t i; 
+
+	for (i = 0; i < n; ++i)
+	{
+		dst->packets[i] = src->packets[i];
+	}
+
+	dst->packet = src->packet;
+	dst->queue_len = n;
+	dst->mark = 0;
+}
+
+
+
 int mq_create(size_t size, size_t len, u16 flush_count)
 {
-	struct msg* queue;
+	struct msg* buffer;
 	size_t i;
 
 	size = roundup_pow_of_two(size);
-	if ((queue = kcalloc(size, sizeof(struct msg) + sizeof(struct pkt) * len, GFP_KERNEL)) == NULL)
+	if ((buffer = kcalloc(size, sizeof(struct msg) + sizeof(struct pkt) * len, GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for message queue\n");
 		return -ENOMEM;
@@ -33,12 +55,12 @@ int mq_create(size_t size, size_t len, u16 flush_count)
 	mq.fcnt = mq.frst = flush_count;
 	mq.size = size;
 	mq.qlen = len;
-	mq.qptr = queue;
+	mq.buff = buffer;
 	init_waitqueue_head(&mq.wait);
 
 	for (i = 0; i < size; ++i)
 	{
-		mq.qptr[i].mark = 0;
+		MSG(i)->mark = 0;
 	}
 
 	return 0;
@@ -55,7 +77,7 @@ void mq_destroy(void)
 	}
 #endif
 
-	kfree(mq.qptr);
+	kfree(mq.buff);
 }
 
 
@@ -86,7 +108,7 @@ int mq_reserve(struct msg** slot)
 	}
 	while (prev != tail);
 
-	*slot = mq.qptr + tail;
+	*slot = MSG(tail);
 	return 0;
 }
 
@@ -100,6 +122,14 @@ void mq_enqueue(struct msg* slot)
 
 
 
+void mq_release(struct msg* slot)
+{
+	slot->mark = 2;
+	wake_up(&mq.wait);
+}
+
+
+
 void mq_signal_waiting(void)
 {
 	mq.fcnt = 0;
@@ -108,30 +138,37 @@ void mq_signal_waiting(void)
 
 
 
-int mq_dequeue(struct msg* buf)
+int mq_dequeue(struct msg* buf, size_t len)
 {
 	int error;
 
-	error = wait_event_interruptible(mq.wait, !mq.fcnt || (mq.head != mq.tail && mq.qptr[mq.head].mark));
-
-	if (error != 0)
+	do
 	{
-		printk(KERN_ERR "Unexpected error: %d\n", error);
-		return error;
-	}
+		error = wait_event_interruptible(mq.wait, !mq.fcnt || (mq.head != mq.tail && MSG(mq.head)->mark));
 
-	if (mq.fcnt-- == 0)
-	{
-		mq.fcnt = mq.frst;
-	}
+		if (error != 0)
+		{
+			printk(KERN_ERR "Unexpected error: %d\n", error);
+			return error;
+		}
 
-	if (mq.head == mq.tail || !mq.qptr[mq.head].mark)
-	{
-		return 1;
-	}
+		if (mq.fcnt-- == 0)
+		{
+			mq.fcnt = mq.frst;
+		}
 
-	mq.qptr[mq.head].mark = 0;
-	*buf = mq.qptr[mq.head];
+		if (mq.head == mq.tail || !MSG(mq.head)->mark)
+		{
+			return 1;
+		}
+
+	}
+	while (MSG(mq.head)->mark == 2);
+
+	msg_copy(MSG(mq.head), buf, len);
+
+	MSG(mq.head)->mark = 0;
 	mq.head = (mq.head + 1) & (mq.size - 1);
+
 	return 0;
 }

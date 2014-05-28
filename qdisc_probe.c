@@ -58,15 +58,18 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 
 	*((struct msg**) ri->data) = msg;
 
-	// Set message data
+	// Load information about the incomming packet
 	th = tcp_hdr(skb);
-	msg->src.sin_family = AF_INET;
-	msg->src.sin_addr.s_addr = ih->saddr;
-	msg->src.sin_port = th->source;
-	msg->dst.sin_family = AF_INET;
-	msg->dst.sin_addr.s_addr = ih->daddr;
-	msg->dst.sin_port = th->dest;
-	msg->plen = skb->len;
+	msg->packet.src.sin_family = AF_INET;
+	msg->packet.src.sin_addr.s_addr = ih->saddr;
+	msg->packet.src.sin_port = th->source;
+	msg->packet.dst.sin_family = AF_INET;
+	msg->packet.dst.sin_addr.s_addr = ih->daddr;
+	msg->packet.dst.sin_port = th->dest;
+	msg->packet.len = skb->len;
+
+	// Load information about the qdisc
+
 	msg->qlen = skb_queue_len(&sch->q);
 
 	return 0;
@@ -85,9 +88,14 @@ static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* reg
 	
 	if (msg != NULL)
 	{
-		// FIXME: Return value might be in regs->orig_eax
-		msg->drop = regs_return_value(regs) == NET_XMIT_DROP;
-		mq_enqueue(msg);
+		if (regs_return_value(regs) == NET_XMIT_DROP)
+		{
+			mq_enqueue(msg);
+		}
+		else
+		{
+			mq_release(msg);
+		}
 	}
 
 	return 0;

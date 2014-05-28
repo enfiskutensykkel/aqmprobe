@@ -18,6 +18,7 @@ struct msg
 {
 	u16        mark;      	// reserved by the message queue API
 	u16        queue_len; 	// the queue length
+	struct pkt packet;		// the current packet
 	struct pkt packets[1];	// information about the packets in the queue
 };
 
@@ -43,8 +44,13 @@ void mq_enqueue(struct msg* slot);
 
 
 
+/* Release the reserved slot instead of enqueueing it */
+void mq_release(struct msg* slot);
+
+
+
 /* Try to dequeue a message from the message queue and copy it into msg */
-int mq_dequeue(struct msg* msg);
+int mq_dequeue(struct msg* msg, size_t max_pkts);
 
 
 
