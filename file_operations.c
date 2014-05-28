@@ -1,5 +1,6 @@
 #include "file_operations.h"
 #include "message_queue.h"
+#include <linux/module.h>
 #include <linux/sched.h>
 
 static spinlock_t open_count_guard;
