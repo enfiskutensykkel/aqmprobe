@@ -143,7 +143,7 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// Create report file
-	if (fo_init())
+	if (fo_init(qdisc_len))
 	{
 		printk(KERN_ERR "Failed to create report file\n");
 		return -ENOMEM;

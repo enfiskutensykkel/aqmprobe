@@ -12,6 +12,18 @@ static atomic_t miss_counter;
 
 
 
+static inline void load_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th)
+{
+	pkt->src.sin_family = AF_INET;
+	pkt->src.sin_addr.s_addr = ih->saddr;
+	pkt->src.sin_port = th->source;
+	pkt->dst.sin_family = AF_INET;
+	pkt->dst.sin_addr.s_addr = ih->daddr;
+	pkt->dst.sin_port = th->dest;
+}
+
+
+
 /* Probe function on function invocation
  * Get the arguments to the probed function.
  *
@@ -28,6 +40,7 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	struct iphdr* ih;
 	struct tcphdr* th;
 	struct msg* msg;
+	u32 i;
 
 	// Extract function arguments from registers
 #ifdef __i386__
@@ -60,17 +73,19 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 
 	// Load information about the incomming packet
 	th = tcp_hdr(skb);
-	msg->packet.src.sin_family = AF_INET;
-	msg->packet.src.sin_addr.s_addr = ih->saddr;
-	msg->packet.src.sin_port = th->source;
-	msg->packet.dst.sin_family = AF_INET;
-	msg->packet.dst.sin_addr.s_addr = ih->daddr;
-	msg->packet.dst.sin_port = th->dest;
+	load_packet(&msg->packet, ih, th);
 	msg->packet.len = skb->len;
 
 	// Load information about the qdisc
+	msg->queue_len = skb_queue_len(&sch->q);
 
-	msg->qlen = skb_queue_len(&sch->q);
+	for (i = 0, skb = sch->q.next; skb != NULL && i < msg->queue_len; ++i, skb = skb->next)
+	{
+		ih = ip_hdr(skb);
+		th = tcp_hdr(skb);
+		load_packet(&msg->packets[i], ih, th);
+		msg->packets[i].len = skb->len;
+	}
 
 	return 0;
 }

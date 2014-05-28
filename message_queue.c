@@ -22,9 +22,9 @@ static struct
 
 
 
-static inline msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
+static inline void msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
 {
-	const size_t n = (pkts < src->queue_len ? pkts : src->queue_len)
+	const size_t n = (pkts < src->queue_len ? pkts : src->queue_len);
 	size_t i; 
 
 	for (i = 0; i < n; ++i)
@@ -41,7 +41,7 @@ static inline msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
 
 int mq_create(size_t size, size_t len, u16 flush_count)
 {
-	struct msg* buffer;
+	char* buffer;
 	size_t i;
 
 	size = roundup_pow_of_two(size);
