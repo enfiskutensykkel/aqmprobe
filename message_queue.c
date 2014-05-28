@@ -11,20 +11,21 @@ static struct
 {
 	size_t             head, // pointer to the first element in the queue
 	                   tail, // pointer to the last element in the queue
-	                   size; // the total capacity of the queue
+	                   size, // the total capacity of the queue
+                       qlen; // length of a full qdisc
 	struct msg*        qptr; // pointer to the actual queue
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
 	u16                fcnt; // flush counter
 } mq;
 
 
-int mq_create(size_t size)
+int mq_create(size_t size, size_t len)
 {
 	struct msg* queue;
 	size_t i;
 
 	size = roundup_pow_of_two(size);
-	if ((queue = kcalloc(size, sizeof(struct msg), GFP_KERNEL)) == NULL)
+	if ((queue = kcalloc(size, sizeof(struct msg) + sizeof(pkt) * len, GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for message queue\n");
 		return -ENOMEM;
@@ -33,6 +34,7 @@ int mq_create(size_t size)
 	mq.head = mq.tail = 0;
 	mq.fcnt = -1;
 	mq.size = size;
+	mq.qlen = len;
 	mq.qptr = queue;
 	init_waitqueue_head(&mq.wait);
 

@@ -7,21 +7,25 @@
 #include <linux/types.h>
 #include <net/net_namespace.h>
 
+
+struct pkt
+{
+	struct sockaddr_in src,	// source address      (src IP + src port)
+                       dst;	// destination address (dst IP + dst port)
+	u16                len;	// the size of the intercepted packet
+};
+
 struct msg
 {
-	struct sockaddr_in  src, // source address      (src IP + src port)
-					    dst; // destination address (dst IP + dst port)
-
-	u32                qlen; // the length of the qdisc when packet was intercepted
-	u16                plen; // the size of the intercepted packet
-	u8                 drop; // was the intercepted packet dropped
-	u8                 mark; // reserved by the message queue API
+	u16        mark;      	// reserved by the message queue API
+	u16        queue_len; 	// the queue length
+	struct pkt packets[1];	// information about the packets in the queue
 };
 
 
 
 /* Allocate and initialize the message queue */
-int mq_create(size_t size);
+int mq_create(size_t size, qdisc_len);
 
 
 

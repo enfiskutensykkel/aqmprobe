@@ -31,21 +31,27 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
 
-
-/* Qdisc argument to module */
-static char* qdisc = NULL;
+static char* qdisc = "pfifo";
 module_param(qdisc, charp, 0);
-MODULE_PARM_DESC(qdisc, "Qdisc to attach to");
+MODULE_PARM_DESC(qdisc, "Name of the qdisc to attach to and probe for drop statistics");
 
-/* Maximum number of concurrent packet events argument to module */
-static int maximum_concurrent_events = 0;
-module_param(maximum_concurrent_events, int, 0);
-MODULE_PARM_DESC(maximum_concurrent_events, "Maximum number of concurrent packet events handled");
 
-/* Maximum buffer size argument to module */
-static int buffer_size = 0;
+static int concurrent_evts = 0;
+module_param(concurrent_evts, int, 0);
+MODULE_PARM_DESC(concurrent_evts, "Number of concurrent events handled before discarding");
+
+
+static int qdisc_len = 0;
+module_param(qdisc_len, int, 0);
+MODULE_PARM_DESC(qdisc_len, "Maximum number of packets enqueued in the qdisc");
+
+
+static int buf_len = 0;
 module_param(buffer_size, int, 0);
-MODULE_PARM_DESC(buffer_size, "Maximum number of buffered packet event reports");
+MODULE_PARM_DESC(buf_len, "Number of buffered event reports before discarding");
+
+
+
 
 /* Report file */
 const char filename[] = "aqmprobe";
@@ -102,20 +108,27 @@ static int __init aqmprobe_entry(void)
 		return -EINVAL;
 	}
 
-	if (maximum_concurrent_events <= 0)
+	if (concurrent_evts <= 0)
 	{
-		printk(KERN_ERR "Number of concurrent packet events must be 1 or greater\n");
+		printk(KERN_ERR "Number of concurrent drop events must be 1 or greater\n");
 		return -EINVAL;
 	}
 
-	if (buffer_size <= 10 || buffer_size > 4096)
+	if (buf_len <= 10 || buf_len > 4096)
 	{
-		printk(KERN_ERR "Number of buffered packet event reports must be greater than 10 and less than 4096\n");
+		printk(KERN_ERR "Number of buffered event reports must be greater than 10 and less than 4096\n");
+		return -EINVAL;
+	}
+
+
+	if (qdisc_len == 0 || qdisc_len > 1000)
+	{
+		printk(KERN_ERR "Number of possible enqueued packets must greater than 0 and less than 1000");
 		return -EINVAL;
 	}
 
 	// Initialize message queue
-	if (!mq_create(buffer_size))
+	if (!mq_create(buf_len, qdisc_len))
 	{
 		return -ENOMEM;
 	}
@@ -127,7 +140,7 @@ static int __init aqmprobe_entry(void)
 	}
 	
 	// Attach probe
-	qp_attach(entry_point, maximum_concurrent_events);
+	qp_attach(entry_point, concurrent_evts);
 
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
 
