@@ -49,9 +49,9 @@ module_param(buf_len, int, 0);
 MODULE_PARM_DESC(buf_len, "Number of buffered event reports before discarding");
 
 
-static int flush_frequency = 1024;
-module_param(flush_frequency, int, 0);
-MODULE_PARM_DESC(flush_frequency, "Number of buffered event reports before triggering file flush");
+static int flush_freq = 1024;
+module_param(flush_freq, int, 0);
+MODULE_PARM_DESC(flush_freq, "Number of buffered event reports before triggering file flush");
 
 
 char* filename = "aqmprobe";
@@ -116,11 +116,15 @@ static int __init aqmprobe_entry(void)
 		return -EINVAL;
 	}
 
+<<<<<<< HEAD
 	// TODO: Calculate max values for buf_len and qdisc_len based on what they are combined instead
 
 	if (buf_len <= 10 || buf_len > 4096)
+=======
+	if (buf_len <= 10 || buf_len > 1024)
+>>>>>>> 933a42a50c86a98e998894d94d77765f5c5633f3
 	{
-		printk(KERN_ERR "Number of buffered event reports must be in range [10-4096]\n");
+		printk(KERN_ERR "Number of buffered event reports must be in range [10-1024]\n");
 		return -EINVAL;
 	}
 
@@ -131,7 +135,7 @@ static int __init aqmprobe_entry(void)
 	}
 	++qdisc_len;
 
-	if (flush_frequency < 1 || flush_frequency >= 65536)
+	if (flush_freq < 1 || flush_freq >= 65536)
 	{
 		printk(KERN_ERR "Number of buffered packet event reports before triggering file flush must be in range [1-65536]\n");
 		return -EINVAL;
@@ -155,7 +159,7 @@ static int __init aqmprobe_entry(void)
 	qp_attach(entry_point, concurrent_evts);
 
 #ifdef DEBUG
-	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d qdisc_len=%d buf_size=%d)\n", qdisc, flush_frequency, qdisc_len, buf_len);
+	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d qdisc_len=%d buf_size=%d)\n", qdisc, flush_freq, qdisc_len, buf_len);
 #else
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
 #endif
