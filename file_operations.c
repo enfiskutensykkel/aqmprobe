@@ -11,12 +11,6 @@ static int open_count __read_mostly = 0;
 
 static struct msg* msg __read_mostly = NULL;
 
-static size_t len __read_mostly = 0;
-
-
-
-#define SIZE(n) (sizeof(struct msg) + sizeof(struct pkt) * (n))
-
 
 
 static int handle_open_file(struct inode* inode, struct file* file)
@@ -52,27 +46,25 @@ static int handle_close_file(struct inode* inode, struct file* file)
 
 
 
-static ssize_t handle_read_file(struct file* file, char __user* buf, size_t buflen, loff_t* ppos)
+static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
 	ssize_t count;
 	int err;
-
-	const size_t max_len = SIZE(len);
 
 	if (buf == NULL)
 	{
 		return -EINVAL;
 	}
 
-	if (buflen < max_len)
+	if (len < MAXSIZE)
 	{
 		printk(KERN_ERR "User-space buffer is too small\n");
 		return 0;
 	}
 
-	for (count = 0; count + max_len <= buflen; )
+	for (count = 0; count + MAXSIZE <= len; )
 	{
-		err = mq_dequeue(msg, len);
+		err = mq_dequeue(msg, qdisc_len);
 
 		if (err != 0)
 		{
@@ -80,13 +72,26 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t bufl
 			return err < 0 ? err : count;
 		}
 
-		if (copy_to_user(buf + count, msg, SIZE(msg->queue_len)))
+#ifdef DEBUG
+		if (msg->queue_len != 0)
+		{
+			printk(KERN_ERR "Qdisc length is zero, yet message was marked as enqueued...\n");
+			continue;
+		}
+
+		if (msg->queue_len != MAXSIZE)
+		{
+			printk(KERN_WARNING "Qdisc length is shorter than max value\n");
+		}
+#endif
+
+		if (copy_to_user(buf + count, msg, MSGSIZE(msg)))
 		{
 			printk(KERN_ERR "Failed to copy to user-space buffer\n");
 			return -EFAULT;
 		}
 
-		count += SIZE(msg->queue_len);
+		count += MSGSIZE(msg);
 	}
 
 	return count;
@@ -105,17 +110,15 @@ static const struct file_operations fo_file_operations =
 
 
 
-int fo_init(size_t queue_len)
+int fo_init(void)
 {
 	spin_lock_init(&open_count_guard);
 
-	if ((msg = kcalloc(1, SIZE(queue_len), GFP_KERNEL)) == NULL)
+	if ((msg = kcalloc(1, SIZE(qdisc_len), GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for write buffer\n");
 		return -ENOMEM;
 	}
-
-	len = queue_len;
 
 	if (!proc_create(filename, S_IRUSR, init_net.proc_net, &fo_file_operations))
 	{

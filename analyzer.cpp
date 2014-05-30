@@ -5,16 +5,21 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <vector>
 
 using namespace std;
 
-struct report
+
+struct packet
 {
-	sockaddr_in source, dest;
-	uint32_t queue_length;
-	uint16_t packet_length;
-	uint8_t dropped;
-	uint8_t reserved;
+	struct sockaddr_in source, destination;
+	uint16_t packet_len;
+};
+
+struct event
+{
+	uint16_t reserved;
+	uint16_t queue_len;
 };
 
 
@@ -49,35 +54,34 @@ string connection(sockaddr_in& src, sockaddr_in& dst)
 }
 
 
-static map<string, uint32_t> total_count;
-static map<string, uint32_t> total_dropped;
-
 
 int main(int argc, char** argv)
 {
 	FILE* fp = stdin;
-	report tmp;
 
-	while (fread(&tmp, sizeof(report), 1, fp))
+	event evt;
+
+	while (fread(&evt, sizeof(event), 1, fp))
 	{
-		string s(connection(tmp.source, tmp.dest));
+		const size_t n = evt.queue_len;
+
+		packet pkt;
+		fread(&pkt, sizeof(packet), 1, fp);
 		
-		if (total_count.count(s) > 0)
-		{
-			total_count[s] += 1;
-			total_dropped[s] += tmp.dropped;
-		}
-		else
-		{
-			total_count[s] = 0;
-			total_dropped[s] = 0;
-		}
-	}
+		printf("%s dropped (qlen=%u)\n", (connection(pkt.source, pkt.destination)).c_str(), evt.queue_len);
 
-	for (map<string,uint32_t>::iterator it = total_count.begin(); it != total_count.end(); it++)
-	{
-		uint32_t dropped = total_dropped[it->first];
-		printf("%20s %8u %8u %8.3f %\n", it->first.c_str(), it->second, dropped, (dropped / (double) it->second) * 100.0);
+
+		vector<packet> packets;
+		for (size_t i = 0; i < n && fread(&pkt, sizeof(packet), 1, fp); ++i)
+		{
+
+			packets.push_back(pkt);
+		}
+
+		for (vector<packet>::iterator it = packets.begin(); it != packets.end(); ++it)
+		{
+			printf("\t%s ps=%u\n", (connection(it->source, it->destination)).c_str(), it->packet_len);
+		}
 	}
 
 	return 0;

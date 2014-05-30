@@ -39,7 +39,7 @@ module_param(concurrent_evts, int, 0);
 MODULE_PARM_DESC(concurrent_evts, "Number of concurrent events handled before discarding");
 
 
-static int qdisc_len = 0;
+int qdisc_len __read_mostly = 0;
 module_param(qdisc_len, int, 0);
 MODULE_PARM_DESC(qdisc_len, "Maximum number of packets enqueued in the qdisc");
 
@@ -116,18 +116,20 @@ static int __init aqmprobe_entry(void)
 		return -EINVAL;
 	}
 
+	// TODO: Calculate max values for buf_len and qdisc_len based on what they are combined instead
+
 	if (buf_len <= 10 || buf_len > 4096)
 	{
 		printk(KERN_ERR "Number of buffered event reports must be in range [10-4096]\n");
 		return -EINVAL;
 	}
 
-
 	if (qdisc_len == 0 || qdisc_len > 1000)
 	{
 		printk(KERN_ERR "Number of possible enqueued packets must be in range [1-1000]\n");
 		return -EINVAL;
 	}
+	++qdisc_len;
 
 	if (flush_frequency < 1 || flush_frequency >= 65536)
 	{
@@ -136,14 +138,14 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// Initialize message queue
-	if (mq_create(buf_len, qdisc_len, flush_frequency))
+	if (mq_create(buf_len, flush_frequency))
 	{
 		printk(KERN_ERR "Failed to allocate event report buffer\n");
 		return -ENOMEM;
 	}
 
 	// Create report file
-	if (fo_init(qdisc_len))
+	if (fo_init())
 	{
 		printk(KERN_ERR "Failed to create report file\n");
 		return -ENOMEM;

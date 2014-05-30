@@ -32,20 +32,19 @@ static inline void msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
 		dst->packets[i] = src->packets[i];
 	}
 
-	dst->packet = src->packet;
 	dst->queue_len = n;
 	dst->mark = 0;
 }
 
 
 
-int mq_create(size_t size, size_t len, u16 flush_count)
+int mq_create(size_t size, u16 flush_count)
 {
 	char* buffer;
 	size_t i;
 
 	size = roundup_pow_of_two(size);
-	if ((buffer = kcalloc(size, sizeof(struct msg) + sizeof(struct pkt) * len, GFP_KERNEL)) == NULL)
+	if ((buffer = kcalloc(size, MAXSIZE, GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for message queue\n");
 		return -ENOMEM;
@@ -54,7 +53,7 @@ int mq_create(size_t size, size_t len, u16 flush_count)
 	mq.head = mq.tail = 0;
 	mq.fcnt = mq.frst = flush_count;
 	mq.size = size;
-	mq.qlen = len;
+	mq.qlen = MAXSIZE;
 	mq.buff = buffer;
 	init_waitqueue_head(&mq.wait);
 
@@ -142,7 +141,7 @@ int mq_dequeue(struct msg* buf, size_t len)
 {
 	int error;
 
-	do
+	for (;;)
 	{
 		error = wait_event_interruptible(mq.wait, !mq.fcnt || (mq.head != mq.tail && MSG(mq.head)->mark));
 
@@ -152,23 +151,31 @@ int mq_dequeue(struct msg* buf, size_t len)
 			return error;
 		}
 
+		// Time to flush?
 		if (mq.fcnt-- == 0)
 		{
 			mq.fcnt = mq.frst;
 		}
 
+		// Forced flush?
 		if (mq.head == mq.tail || !MSG(mq.head)->mark)
 		{
 			return 1;
 		}
 
+		// If message was enqueued, copy it to the buffer and return
+		if (MSG(mq.head)->mark == 1)
+		{
+			msg_copy(MSG(mq.head), buf, len);
+
+			MSG(mq.head)->mark = 0;
+			mq.head = (mq.head + 1) & (mq.size - 1);
+
+			return 0;
+		}
+
+		// Message was released and not enqueued
+		MSG(mq.head)->mark = 0;
+		mq.head = (mq.head + 1) & (mq.size - 1);
 	}
-	while (MSG(mq.head)->mark == 2);
-
-	msg_copy(MSG(mq.head), buf, len);
-
-	MSG(mq.head)->mark = 0;
-	mq.head = (mq.head + 1) & (mq.size - 1);
-
-	return 0;
 }

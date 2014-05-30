@@ -12,7 +12,7 @@ static atomic_t miss_counter;
 
 
 
-static inline void load_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th)
+static inline void fill_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th)
 {
 	pkt->src.sin_family = AF_INET;
 	pkt->src.sin_addr.s_addr = ih->saddr;
@@ -73,18 +73,18 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 
 	// Load information about the incomming packet
 	th = tcp_hdr(skb);
-	load_packet(&msg->packet, ih, th);
-	msg->packet.len = skb->len;
+	fill_packet(&msg->packets[0], ih, th);
+	msg->packets[0].len = skb->len;
 
 	// Load information about the qdisc
 	msg->queue_len = skb_queue_len(&sch->q);
 
-	for (i = 0, skb = sch->q.next; skb != NULL && i < msg->queue_len; ++i, skb = skb->next)
+	for (i = 0, skb = sch->q.next; skb != NULL && i < qdisc_len && i < msg->queue_len; ++i, skb = skb->next)
 	{
 		ih = ip_hdr(skb);
 		th = tcp_hdr(skb);
-		load_packet(&msg->packets[i], ih, th);
-		msg->packets[i].len = skb->len;
+		fill_packet(&msg->packets[i + 1], ih, th);
+		msg->packets[i + i].len = skb->len;
 	}
 
 	return 0;
@@ -109,6 +109,9 @@ static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* reg
 		}
 		else
 		{
+#ifdef DEBUG
+			msg->queue_len = 0;
+#endif
 			mq_release(msg);
 		}
 	}

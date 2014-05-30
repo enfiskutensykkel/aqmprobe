@@ -7,6 +7,11 @@
 #include <net/net_namespace.h>
 
 
+
+extern int qdisc_len __read_mostly;
+
+
+
 struct pkt
 {
 	struct sockaddr_in src,	// source address      (src IP + src port)
@@ -18,14 +23,16 @@ struct msg
 {
 	u16        mark;      	// reserved by the message queue API
 	u16        queue_len; 	// the queue length
-	struct pkt packet;		// the current packet
 	struct pkt packets[1];	// information about the packets in the queue
 };
 
-
+#define MAXSIZE (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len))
+#define MSGSIZE(m) (sizeof(struct msg) + sizeof(struct pkt) * ((m)->queue_len + 1))
+		
+		
 
 /* Allocate and initialize the message queue */
-int mq_create(size_t size, size_t qdisc_length, u16 flush_count);
+int mq_create(size_t size, u16 flush_count);
 
 
 
