@@ -116,13 +116,9 @@ static int __init aqmprobe_entry(void)
 		return -EINVAL;
 	}
 
-<<<<<<< HEAD
 	// TODO: Calculate max values for buf_len and qdisc_len based on what they are combined instead
 
-	if (buf_len <= 10 || buf_len > 4096)
-=======
 	if (buf_len <= 10 || buf_len > 1024)
->>>>>>> 933a42a50c86a98e998894d94d77765f5c5633f3
 	{
 		printk(KERN_ERR "Number of buffered event reports must be in range [10-1024]\n");
 		return -EINVAL;
@@ -142,7 +138,7 @@ static int __init aqmprobe_entry(void)
 	}
 
 	// Initialize message queue
-	if (mq_create(buf_len, flush_frequency))
+	if (mq_create(buf_len, flush_freq))
 	{
 		printk(KERN_ERR "Failed to allocate event report buffer\n");
 		return -ENOMEM;

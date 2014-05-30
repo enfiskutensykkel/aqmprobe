@@ -114,7 +114,7 @@ int fo_init(void)
 {
 	spin_lock_init(&open_count_guard);
 
-	if ((msg = kcalloc(1, SIZE(qdisc_len), GFP_KERNEL)) == NULL)
+	if ((msg = kcalloc(1, MAXSIZE, GFP_KERNEL)) == NULL)
 	{
 		printk(KERN_ERR "Insufficient memory for write buffer\n");
 		return -ENOMEM;
