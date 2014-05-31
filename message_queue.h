@@ -26,7 +26,7 @@ struct msg
 	struct pkt packets[1];	// information about the packets in the queue
 };
 
-#define MAXSIZE (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len))
+#define MAXSIZE (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len + 1))
 #define MSGSIZE(m) (sizeof(struct msg) + sizeof(struct pkt) * ((m)->queue_len + 1))
 		
 		

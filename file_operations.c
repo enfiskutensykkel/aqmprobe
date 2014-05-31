@@ -73,13 +73,13 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len,
 		}
 
 #ifdef DEBUG
-		if (msg->queue_len != 0)
+		if (msg->queue_len == 0)
 		{
 			printk(KERN_ERR "Qdisc length is zero, yet message was marked as enqueued...\n");
 			continue;
 		}
 
-		if (msg->queue_len != MAXSIZE)
+		if (msg->queue_len != qdisc_len)
 		{
 			printk(KERN_WARNING "Qdisc length is shorter than max value\n");
 		}

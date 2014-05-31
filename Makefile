@@ -27,7 +27,7 @@ clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 analyzer:
-	g++ -Wall -Wextra -pedantic -o $@ analyzer.cpp
+	g++ -Wall -Wextra -pedantic -o $@ analyzer.cpp $(addprefix -D,$(MODARGS))
 
 todo:
 	-@for file in $(OBJECTS:%.o=%.c) $(wildcard *.h); do \

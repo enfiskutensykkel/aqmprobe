@@ -129,7 +129,6 @@ static int __init aqmprobe_entry(void)
 		printk(KERN_ERR "Number of possible enqueued packets must be in range [1-1000]\n");
 		return -EINVAL;
 	}
-	++qdisc_len;
 
 	if (flush_freq < 1 || flush_freq >= 65536)
 	{

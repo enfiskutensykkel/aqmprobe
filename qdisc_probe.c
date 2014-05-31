@@ -105,6 +105,13 @@ static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* reg
 	{
 		if (regs_return_value(regs) == NET_XMIT_DROP)
 		{
+#ifdef DEBUG
+			if (msg->queue_len != qdisc_len)
+			{
+				printk(KERN_WARNING "Packet dropped, but qdisc isn't full\n");
+			}
+#endif
+
 			mq_enqueue(msg);
 		}
 		else

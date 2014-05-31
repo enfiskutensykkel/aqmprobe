@@ -8,8 +8,7 @@ static struct
 {
 	size_t             head, // pointer to the first element in the queue
 	                   tail, // pointer to the last element in the queue
-	                   size, // the total capacity of the queue
-                       qlen; // length of a full qdisc
+	                   size; // the total capacity of the queue
 	char*              buff; // pointer to the report buffer
 	wait_queue_head_t  wait; // condition variable to wait on when the queue is empty
 	u16                fcnt, // flush counter
@@ -18,7 +17,7 @@ static struct
 
 
 
-#define MSG(pos) ((struct msg*) (mq.buff + (sizeof(struct msg) + sizeof(struct pkt) * mq.qlen) * (pos)))
+#define MSG(pos) (((struct msg*) (mq.buff + (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len + 1))) + (pos)))
 
 
 
@@ -53,7 +52,6 @@ int mq_create(size_t size, u16 flush_count)
 	mq.head = mq.tail = 0;
 	mq.fcnt = mq.frst = flush_count;
 	mq.size = size;
-	mq.qlen = MAXSIZE;
 	mq.buff = buffer;
 	init_waitqueue_head(&mq.wait);
 
