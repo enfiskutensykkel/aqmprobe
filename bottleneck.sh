@@ -8,8 +8,11 @@ if [ "`whoami`" != "root" ]; then
 	exit 1
 fi
 
+# do this anyway
+sysctl -w kernel.panic=40 1> /dev/null
+
 if [ -z "$iface" ]; then
-	echo "Usage: $0 <iface> [rate]"
+	echo "Usage: $0 <iface> [rate]" 1>&2
 	exit 1
 fi
 
@@ -31,7 +34,6 @@ if [ -z "$rate" ]; then
 	rate=200kbit
 fi
 
-sysctl -w kernel.panic=40
 tc qdisc del dev $iface root
 tc qdisc add dev $iface root handle 1: htb default 10
 tc class add dev $iface parent 1: classid 1:10 htb rate $rate ceil $rate burst 1520

@@ -1,7 +1,7 @@
 TARGET 	:= aqmprobe
 OBJECTS := main.o message_queue.o qdisc_probe.o file_operations.o
 QDISC   := pfifo
-MODARGS := qdisc_len=62 buf_len=1024 concurrent_evts=40 flush_freq=2000
+MODARGS := qdisc_len=31 buf_len=1024 concurrent_evts=40 flush_freq=2000
 
 ifneq ($(KERNELRELEASE),)
 	ccflags-y += -DDEBUG
