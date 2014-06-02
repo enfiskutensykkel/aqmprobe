@@ -90,7 +90,7 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len,
 		}
 #endif
 
-		if (message->queue_len != qdisc_len)
+		if (message->queue_len != (qdisc_len - 1))
 		{
 			printk(KERN_INFO "Queue length is shorter than qdisc_len value (queue_len=%u qdisc_len=%u)\n", message->queue_len, qdisc_len);
 		}

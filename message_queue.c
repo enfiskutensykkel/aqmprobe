@@ -99,9 +99,9 @@ int mq_reserve(struct msg** slot)
 		}
 
 #ifdef __i386__
-		prev = cmpxchg(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg(&mq.tail, tail, ((tail + 1) & size));
 #else
-		prev = cmpxchg64(&mq.tail, tail, (tail + 1) & size);
+		prev = cmpxchg64(&mq.tail, tail, ((tail + 1) & size));
 #endif
 	}
 	while (prev != tail);

@@ -11,7 +11,7 @@
 static atomic_t miss_counter;
 
 /* Is user notified about error condition? */
-static int notified = 0;
+static int notified __read_mostly = 0;
 
 
 static inline void fill_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th, u16 len)
@@ -85,21 +85,12 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	fill_packet(&msg->packets[0], ih, th, skb->len);
 
 	// Load information about the qdisc
-	msg->queue_len = MIN(qdisc_len, skb_queue_len(&sch->q));
+	msg->queue_len = MIN(qdisc_len - 1, skb_queue_len(&sch->q));
 
-	if (sch->limit != (qdisc_len - 1))
+	if (!notified && sch->limit != (qdisc_len - 1))
 	{
-		if (!notified)
-		{
-			printk(KERN_WARNING "Qdisc length is set to %d but actual length is %d\n", qdisc_len, sch->limit + 1);
-			notified = 1;
-		}
-
-		if (sch->limit < (qdisc_len - 1))
-		{
-			printk(KERN_INFO "Adjusting qdisc length from %d to %d\n", qdisc_len, sch->limit + 1);
-			qdisc_len = sch->limit + 1;
-		}
+		printk(KERN_WARNING "Qdisc length is set to %d but actual length is %d\n", qdisc_len - 1, sch->limit);
+		notified = 1;
 	}
 
 	for (i = 0, skb = sch->q.next; skb != NULL && i < msg->queue_len; ++i, skb = skb->next)
@@ -130,11 +121,11 @@ static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* reg
 
 		if (status == NET_XMIT_DROP)
 		{
-			if (msg->queue_len != qdisc_len)
+			if (msg->queue_len != (qdisc_len - 1))
 			{
 				printk(KERN_INFO "Packet dropped, but qdisc isn't full (qlen=%u qdisc_len=%u)\n", msg->queue_len, qdisc_len);
 			}
-			
+
 			mq_enqueue(msg);
 			return 0;
 		}
