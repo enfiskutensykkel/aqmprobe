@@ -10,9 +10,11 @@
 /* Count number of events we have to discard because the message queue is full */
 static atomic_t miss_counter;
 
+/* Is user notified about error condition? */
+static int notified = 0;
 
 
-static inline void fill_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th)
+static inline void fill_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr* th, u16 len)
 {
 	pkt->src.sin_family = AF_INET;
 	pkt->src.sin_addr.s_addr = ih->saddr;
@@ -20,6 +22,7 @@ static inline void fill_packet(struct pkt* pkt, struct iphdr* ih, struct tcphdr*
 	pkt->dst.sin_family = AF_INET;
 	pkt->dst.sin_addr.s_addr = ih->daddr;
 	pkt->dst.sin_port = th->dest;
+	pkt->len = len;
 }
 
 
@@ -55,6 +58,9 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	ih = ip_hdr(skb);
 	if (ih->protocol != 6)
 	{
+#ifdef DEBUG
+		printk(KERN_DEBUG "Non-TCP packet discarded\n");
+#endif
 		// Ignore non-TCP packet
 		*((struct msg**) ri->data) = NULL;
 		return 0; 
@@ -63,6 +69,9 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	// Try to reserve a message queue slot
 	if (mq_reserve(&msg))
 	{
+#ifdef DEBUG
+		printk(KERN_DEBUG "Message buffer is full\n");
+#endif
 		// Message queue is full
 		*((struct msg**) ri->data) = NULL;
 		atomic_inc(&miss_counter);
@@ -73,18 +82,31 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 
 	// Load information about the incomming packet
 	th = tcp_hdr(skb);
-	fill_packet(&msg->packets[0], ih, th);
-	msg->packets[0].len = skb->len;
+	fill_packet(&msg->packets[0], ih, th, skb->len);
 
 	// Load information about the qdisc
-	msg->queue_len = skb_queue_len(&sch->q);
+	msg->queue_len = MIN(qdisc_len, skb_queue_len(&sch->q));
 
-	for (i = 0, skb = sch->q.next; skb != NULL && i < qdisc_len && i < msg->queue_len; ++i, skb = skb->next)
+	if (sch->limit != (qdisc_len - 1))
+	{
+		if (!notified)
+		{
+			printk(KERN_WARNING "Qdisc length is set to %d but actual length is %d\n", qdisc_len, sch->limit + 1);
+			notified = 1;
+		}
+
+		if (sch->limit < (qdisc_len - 1))
+		{
+			printk(KERN_INFO "Adjusting qdisc length from %d to %d\n", qdisc_len, sch->limit + 1);
+			qdisc_len = sch->limit + 1;
+		}
+	}
+
+	for (i = 0, skb = sch->q.next; skb != NULL && i < msg->queue_len; ++i, skb = skb->next)
 	{
 		ih = ip_hdr(skb);
 		th = tcp_hdr(skb);
-		fill_packet(&msg->packets[i + 1], ih, th);
-		msg->packets[i + i].len = skb->len;
+		fill_packet(&msg->packets[i + 1], ih, th, qdisc_pkt_len(skb));
 	}
 
 	return 0;
@@ -99,28 +121,34 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
  */
 static int handle_func_return(struct kretprobe_instance* ri, struct pt_regs* regs)
 {
+	int status;
 	struct msg* msg = *((struct msg**) ri->data);
 	
 	if (msg != NULL)
 	{
-		if (regs_return_value(regs) == NET_XMIT_DROP)
+		status = regs_return_value(regs);
+
+		if (status == NET_XMIT_DROP)
 		{
-#ifdef DEBUG
 			if (msg->queue_len != qdisc_len)
 			{
-				printk(KERN_WARNING "Packet dropped, but qdisc isn't full\n");
+				printk(KERN_INFO "Packet dropped, but qdisc isn't full (qlen=%u qdisc_len=%u)\n", msg->queue_len, qdisc_len);
 			}
-#endif
-
+			
 			mq_enqueue(msg);
+			return 0;
 		}
-		else
+
+		if (status != NET_XMIT_SUCCESS)
 		{
-#ifdef DEBUG
-			msg->queue_len = 0;
-#endif
-			mq_release(msg);
+			printk(KERN_WARNING "Packet not enqueued but not dropped either\n");
+			atomic_inc(&miss_counter);
 		}
+
+#ifdef DEBUG
+		msg->queue_len = 0;
+#endif
+		mq_release(msg);
 	}
 
 	return 0;

@@ -17,16 +17,17 @@ static struct
 
 
 
-#define MSG(pos) (((struct msg*) (mq.buff + (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len + 1))) + (pos)))
+#define MSG(pos) \
+	((struct msg*) (mq.buff + ((sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len))) * pos))
 
 
 
-static inline void msg_copy(const struct msg* src, struct msg* dst, size_t pkts)
+static inline void msg_copy(const struct msg* src, struct msg* dst)
 {
-	const size_t n = (pkts < src->queue_len ? pkts : src->queue_len);
+	const size_t n = MIN(qdisc_len, src->queue_len); 
 	size_t i; 
 
-	for (i = 0; i < n; ++i)
+	for (i = 0; i <= n; ++i)
 	{
 		dst->packets[i] = src->packets[i];
 	}
@@ -106,6 +107,10 @@ int mq_reserve(struct msg** slot)
 	while (prev != tail);
 
 	*slot = MSG(tail);
+#ifdef DEBUG
+	(*slot)->mark = 0;
+	(*slot)->queue_len = 0;
+#endif
 	return 0;
 }
 
@@ -122,6 +127,9 @@ void mq_enqueue(struct msg* slot)
 void mq_release(struct msg* slot)
 {
 	slot->mark = 2;
+#ifdef DEBUG
+	slot->queue_len = 0;
+#endif
 	wake_up(&mq.wait);
 }
 
@@ -135,7 +143,7 @@ void mq_signal_waiting(void)
 
 
 
-int mq_dequeue(struct msg* buf, size_t len)
+int mq_dequeue(struct msg* buf)
 {
 	int error;
 
@@ -164,7 +172,7 @@ int mq_dequeue(struct msg* buf, size_t len)
 		// If message was enqueued, copy it to the buffer and return
 		if (MSG(mq.head)->mark == 1)
 		{
-			msg_copy(MSG(mq.head), buf, len);
+			msg_copy(MSG(mq.head), buf);
 
 			MSG(mq.head)->mark = 0;
 			mq.head = (mq.head + 1) & (mq.size - 1);
@@ -173,6 +181,9 @@ int mq_dequeue(struct msg* buf, size_t len)
 		}
 
 		// Message was released and not enqueued
+#ifdef DEBUG
+		MSG(mq.head)->queue_len = 0;
+#endif
 		MSG(mq.head)->mark = 0;
 		mq.head = (mq.head + 1) & (mq.size - 1);
 	}

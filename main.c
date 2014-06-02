@@ -154,7 +154,8 @@ static int __init aqmprobe_entry(void)
 	qp_attach(entry_point, concurrent_evts);
 
 #ifdef DEBUG
-	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d qdisc_len=%d buf_size=%d)\n", qdisc, flush_freq, qdisc_len, buf_len);
+	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d qdisc_len=%d buf_size=%d, sizeof(msg)=%lu sizeof(pkt)=%lu)\n", 
+			qdisc, flush_freq, qdisc_len, buf_len, sizeof(struct msg), sizeof(struct pkt));
 #else
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
 #endif

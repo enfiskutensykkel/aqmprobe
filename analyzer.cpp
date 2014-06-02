@@ -10,20 +10,8 @@
 using namespace std;
 
 
-struct packet
-{
-	struct sockaddr_in source, destination;
-	uint16_t packet_len;
-};
 
-struct event
-{
-	uint16_t reserved;
-	uint16_t queue_len;
-};
-
-
-string connection(sockaddr_in& src, sockaddr_in& dst)
+string info(sockaddr_in& src, sockaddr_in& dst)
 {
 	ostringstream str;
 
@@ -55,32 +43,46 @@ string connection(sockaddr_in& src, sockaddr_in& dst)
 
 
 
-int main(int argc, char** argv)
+struct packet
+{
+	struct sockaddr_in source, destination;
+	uint16_t packet_len;
+};
+
+struct event
+{
+	uint16_t reserved;
+	uint16_t queue_len;
+};
+
+
+string info(packet& pkt)
+{
+	ostringstream s;
+	s << "conn=" << info(pkt.source, pkt.destination) << ", ps=" << pkt.packet_len;
+	return s.str();
+}
+
+
+
+int main()
 {
 	FILE* fp = stdin;
-
 	event evt;
 
 	while (fread(&evt, sizeof(event), 1, fp))
 	{
-		const size_t n = evt.queue_len;
-
-		packet pkt;
-		fread(&pkt, sizeof(packet), 1, fp);
-		
-		printf("%s dropped (qlen=%u)\n", (connection(pkt.source, pkt.destination)).c_str(), evt.queue_len);
-
-
-		vector<packet> packets;
-		for (size_t i = 0; i < n && fread(&pkt, sizeof(packet), 1, fp); ++i)
+		printf("queue length = %u\n", evt.queue_len);
+		for (uint16_t i = 0; i < evt.queue_len; ++i)
 		{
+			packet pkt;
 
-			packets.push_back(pkt);
-		}
+			if (!fread(&pkt, sizeof(packet), 1, fp))
+			{
+				return 1;
+			}
 
-		for (vector<packet>::iterator it = packets.begin(); it != packets.end(); ++it)
-		{
-			printf("\t%s ps=%u\n", (connection(it->source, it->destination)).c_str(), it->packet_len);
+			printf("\t%s\n", info(pkt).c_str());
 		}
 	}
 

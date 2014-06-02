@@ -6,6 +6,8 @@
 
 #include <net/net_namespace.h>
 
+#define MIN(a, b) ((a) <= (b) ? (a) : (b))
+
 
 
 extern int qdisc_len __read_mostly;
@@ -23,11 +25,11 @@ struct msg
 {
 	u16        mark;      	// reserved by the message queue API
 	u16        queue_len; 	// the queue length
-	struct pkt packets[1];	// information about the packets in the queue
+	struct pkt packets[0];	// information about the packets in the queue
 };
 
-#define MAXSIZE (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len + 1))
-#define MSGSIZE(m) (sizeof(struct msg) + sizeof(struct pkt) * ((m)->queue_len + 1))
+#define MAXSIZE (sizeof(struct msg) + sizeof(struct pkt) * (qdisc_len))
+#define MSGSIZE(m) (sizeof(struct msg) + sizeof(struct pkt) * ((m)->queue_len))
 		
 		
 
@@ -57,7 +59,7 @@ void mq_release(struct msg* slot);
 
 
 /* Try to dequeue a message from the message queue and copy it into msg */
-int mq_dequeue(struct msg* msg, size_t max_pkts);
+int mq_dequeue(struct msg* msg);
 
 
 

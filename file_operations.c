@@ -9,8 +9,6 @@ static spinlock_t open_count_guard;
 
 static int open_count __read_mostly = 0;
 
-static struct msg* msg __read_mostly = NULL;
-
 
 
 static int handle_open_file(struct inode* inode, struct file* file)
@@ -48,6 +46,7 @@ static int handle_close_file(struct inode* inode, struct file* file)
 
 static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len, loff_t* ppos)
 {
+	struct msg* message;
 	ssize_t count;
 	int err;
 
@@ -56,44 +55,59 @@ static ssize_t handle_read_file(struct file* file, char __user* buf, size_t len,
 		return -EINVAL;
 	}
 
+	if ((message = kcalloc(1, MAXSIZE, GFP_KERNEL)) == NULL)
+	{
+		printk(KERN_ERR "Insufficient memory for write buffer\n");
+		return -ENOMEM;
+	}
+
 	if (len < MAXSIZE)
 	{
 		printk(KERN_ERR "User-space buffer is too small\n");
+		kfree(message);
 		return 0;
 	}
 
 	for (count = 0; count + MAXSIZE <= len; )
 	{
-		err = mq_dequeue(msg, qdisc_len);
+		err = mq_dequeue(message);
 
 		if (err != 0)
 		{
+#ifdef DEBUG
+			printk(KERN_DEBUG "Flushing %ld bytes to user-space\n", count);
+#endif
 			// Force flush file
+			kfree(message);
 			return err < 0 ? err : count;
 		}
 
 #ifdef DEBUG
-		if (msg->queue_len == 0)
+		if (message->queue_len == 0)
 		{
-			printk(KERN_ERR "Qdisc length is zero, yet message was marked as enqueued...\n");
+			printk(KERN_DEBUG "ERROR STATE: Qdisc length is zero, yet message was marked as enqueued...\n");
 			continue;
-		}
-
-		if (msg->queue_len != qdisc_len)
-		{
-			printk(KERN_WARNING "Qdisc length is shorter than max value\n");
 		}
 #endif
 
-		if (copy_to_user(buf + count, msg, MSGSIZE(msg)))
+		if (message->queue_len != qdisc_len)
 		{
-			printk(KERN_ERR "Failed to copy to user-space buffer\n");
+			printk(KERN_INFO "Queue length is shorter than qdisc_len value (queue_len=%u qdisc_len=%u)\n", message->queue_len, qdisc_len);
+		}
+
+		if (copy_to_user(buf + count, message, MSGSIZE(message)))
+		{
+			printk(KERN_ERR "Failed to copy message to user-space buffer\n");
 			return -EFAULT;
 		}
 
-		count += MSGSIZE(msg);
+		count += MSGSIZE(message);
 	}
 
+#ifdef DEBUG
+	printk(KERN_DEBUG "Flushing %ld bytes to user-space\n", count);
+#endif
+	kfree(message);
 	return count;
 }
 
@@ -113,12 +127,6 @@ static const struct file_operations fo_file_operations =
 int fo_init(void)
 {
 	spin_lock_init(&open_count_guard);
-
-	if ((msg = kcalloc(1, MAXSIZE, GFP_KERNEL)) == NULL)
-	{
-		printk(KERN_ERR "Insufficient memory for write buffer\n");
-		return -ENOMEM;
-	}
 
 	if (!proc_create(filename, S_IRUSR, init_net.proc_net, &fo_file_operations))
 	{
@@ -148,9 +156,7 @@ void fo_destroy(void)
 
 	} while (1);
 
-	spin_unlock_bh(&open_count_guard);
 	remove_proc_entry(filename, init_net.proc_net);
+	spin_unlock_bh(&open_count_guard);
 	printk(KERN_INFO "Removing file: /proc/net/%s\n", filename);
-
-	kfree(msg);
 }
