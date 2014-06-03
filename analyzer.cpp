@@ -9,9 +9,9 @@
 
 using namespace std;
 
+typedef map<string, uint32_t> connmap;
 
-
-string info(sockaddr_in& src, sockaddr_in& dst)
+string connstr(sockaddr_in& src, sockaddr_in& dst)
 {
 	ostringstream str;
 
@@ -43,11 +43,29 @@ string info(sockaddr_in& src, sockaddr_in& dst)
 
 
 
-struct packet
+struct queue_info
 {
-	struct sockaddr_in source, destination;
-	uint16_t packet_len;
+	connmap count;
+	connmap queue[qdisc_len];
+
+	void add(string& s, int idx)
+	{
+		connmap::iterator it = count.find(s);
+
+		if (it == count.end())
+		{
+			count[s] = 1;
+			queue[idx][s] = 1;
+			return;
+		}
+
+		it->second += 1;
+		queue[idx][s] += 1;
+	}
 };
+
+
+map<string, queue_info> data;
 
 struct event
 {
@@ -55,14 +73,11 @@ struct event
 	uint16_t queue_len;
 };
 
-
-string info(packet& pkt)
+struct packet
 {
-	ostringstream s;
-	s << "conn=" << info(pkt.source, pkt.destination) << ", ps=" << pkt.packet_len;
-	return s.str();
-}
-
+	struct sockaddr_in source, destination;
+	uint16_t packet_len;
+};
 
 
 int main()
@@ -72,8 +87,16 @@ int main()
 
 	while (fread(&evt, sizeof(event), 1, fp))
 	{
-		printf("queue length = %u\n", evt.queue_len);
-		for (uint16_t i = 0; i < evt.queue_len; ++i)
+		packet first;
+
+		if (!fread(&first, sizeof(packet), 1, fp))
+		{
+			return 2;
+		}
+
+		string connection = connstr(first.source, first.destination);
+
+		for (uint16_t i = 1; i < evt.queue_len; ++i)
 		{
 			packet pkt;
 
@@ -82,7 +105,23 @@ int main()
 				return 1;
 			}
 
-			printf("\t%s\n", info(pkt).c_str());
+			string packetstr = connstr(pkt.source, pkt.destination);
+			data[connection].add(packetstr, i - 1);
+		}
+	}
+
+	for (map<string, queue_info>::iterator it = data.begin(); it != data.end(); ++it)
+	{
+		printf("%s\n", it->first.c_str());
+
+		for (uint16_t i = 0; i < qdisc_len; ++i)
+		{
+			printf("\t%3u\n", i);
+
+			for (connmap::iterator a = it->second.queue[i].begin(); a != it->second.queue[i].end(); ++a)
+			{
+				printf("\t\t%s : %3u\n", a->first.c_str(), a->second);
+			}
 		}
 	}
 
