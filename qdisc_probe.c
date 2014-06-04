@@ -59,6 +59,7 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	*((struct msg**) ri->data) = msg;
 
 	// Set message data
+	msg->time = ktime_get();
 	th = tcp_hdr(skb);
 	msg->src.sin_family = AF_INET;
 	msg->src.sin_addr.s_addr = ih->saddr;
@@ -66,7 +67,7 @@ static int handle_func_invoke(struct kretprobe_instance* ri, struct pt_regs* reg
 	msg->dst.sin_family = AF_INET;
 	msg->dst.sin_addr.s_addr = ih->daddr;
 	msg->dst.sin_port = th->dest;
-	msg->plen = skb->len;
+	msg->plen = qdisc_pkt_len(skb);
 	msg->qlen = skb_queue_len(&sch->q);
 
 	return 0;

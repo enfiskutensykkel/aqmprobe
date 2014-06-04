@@ -5,12 +5,14 @@
 #define __AQMPROBE_MQ_H__
 
 #include <net/net_namespace.h>
+#include <linux/ktime.h>
 
 struct msg
 {
 	struct sockaddr_in  src, // source address      (src IP + src port)
 	                    dst; // destination address (dst IP + dst port)
 
+	ktime_t            time; // the timestamp of the packet event
 	u32                qlen; // the length of the qdisc when packet was intercepted
 	u16                plen; // the size of the intercepted packet
 	u8                 drop; // was the intercepted packet dropped
