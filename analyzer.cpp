@@ -11,6 +11,7 @@ using namespace std;
 struct report
 {
 	sockaddr_in source, dest;
+	uint64_t time_stamp;
 	uint32_t queue_length;
 	uint16_t packet_length;
 	uint8_t dropped;
@@ -69,15 +70,15 @@ int main(int argc, char** argv)
 		}
 		else
 		{
-			total_count[s] = 0;
-			total_dropped[s] = 0;
+			total_count[s] = 1;
+			total_dropped[s] = 1;
 		}
 	}
 
 	for (map<string,uint32_t>::iterator it = total_count.begin(); it != total_count.end(); it++)
 	{
 		uint32_t dropped = total_dropped[it->first];
-		printf("%20s %8u %8u %8.3f %\n", it->first.c_str(), it->second, dropped, (dropped / (double) it->second) * 100.0);
+		printf("%20s %8u %8u %8.3f %%\n", it->first.c_str(), it->second, dropped, (dropped / (double) it->second) * 100.0);
 	}
 
 	return 0;

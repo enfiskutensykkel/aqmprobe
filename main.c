@@ -144,6 +144,7 @@ static int __init aqmprobe_entry(void)
 
 #ifdef DEBUG
 	printk(KERN_INFO "Probe registered on Qdisc=%s (flush_freq=%d buf_size=%d)\n", qdisc, flush_frequency, buffer_size);
+	printk(KERN_DEBUG "sizeof(struct msg)=%lu\n", sizeof(struct msg));
 #else
 	printk(KERN_INFO "Probe registered on Qdisc=%s\n", qdisc);
 #endif
