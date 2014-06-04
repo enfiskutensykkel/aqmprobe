@@ -59,6 +59,8 @@ int main(int argc, char** argv)
 	FILE* fp = stdin;
 	report tmp;
 
+	uint64_t first = 0;
+
 	while (fread(&tmp, sizeof(report), 1, fp))
 	{
 		string s(connection(tmp.source, tmp.dest));
@@ -73,12 +75,20 @@ int main(int argc, char** argv)
 			total_count[s] = 1;
 			total_dropped[s] = 1;
 		}
+
+		if (first == 0)
+		{
+			first = tmp.time_stamp;
+		}
+
+		fprintf(stdout, "%lu, %u, %s, %u, %u\n", (tmp.time_stamp - first), tmp.queue_length, s.c_str(), tmp.packet_length, tmp.dropped);
 	}
+
 
 	for (map<string,uint32_t>::iterator it = total_count.begin(); it != total_count.end(); it++)
 	{
 		uint32_t dropped = total_dropped[it->first];
-		printf("%20s %8u %8u %8.3f %%\n", it->first.c_str(), it->second, dropped, (dropped / (double) it->second) * 100.0);
+		fprintf(stderr, "%20s %8u %8u %8.3f %%\n", it->first.c_str(), it->second, dropped, (dropped / (double) it->second) * 100.0);
 	}
 
 	return 0;
