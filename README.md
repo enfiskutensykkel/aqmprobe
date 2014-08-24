@@ -10,3 +10,12 @@ For more information, refer the documentation on [kprobes](https://www.kernel.or
 [netem](http://www.linuxfoundation.org/collaborate/workgroups/networking/netem).
 
 **NB!** This module only works for x86 due to architecture specific behaviour.
+
+
+Usage
+-----
+ 1. Compile and load module: `make && make load`
+ 2. Dump results to file: `cat /proc/net/pfifo > result.bin`
+ 3. Stop dumping and unload module: `make unload`
+ 4. Compile analyser: `make analyzer`
+ 5. Analyse results: `cat result.bin | ./analyzer | ./clustering.py`
