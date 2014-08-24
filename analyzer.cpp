@@ -53,9 +53,9 @@ string connection(sockaddr_in& src, sockaddr_in& dst)
 static map<string, uint32_t> total_count;
 static map<string, uint32_t> total_dropped;
 
-
 int main(int argc, char** argv)
 {
+
 	FILE* fp = stdin;
 	report tmp;
 
@@ -81,7 +81,9 @@ int main(int argc, char** argv)
 			first = tmp.time_stamp;
 		}
 
-		fprintf(stdout, "%lu, %u, %s, %u, %u\n", (tmp.time_stamp - first), tmp.queue_length, s.c_str(), tmp.packet_length, tmp.dropped);
+		fprintf(stdout, "%lu, %u, %s, %u, %u, %u\n", (tmp.time_stamp - first), tmp.queue_length, s.c_str(), tmp.packet_length, tmp.dropped, 
+				ntohs(tmp.dest.sin_port)
+				);
 	}
 
 
